@@ -6,6 +6,7 @@ import com.custom.astrion.cards.impl.BubbleLightCard
 import com.custom.astrion.cards.impl.ButtonGridCard
 import com.custom.astrion.cards.impl.ClimateCard
 import com.custom.astrion.cards.impl.ClockWeatherCard
+import com.custom.astrion.cards.impl.ConditionalCard
 import com.custom.astrion.cards.impl.CoverCard
 import com.custom.astrion.cards.impl.FanCard
 import com.custom.astrion.cards.impl.LightCard
@@ -54,6 +55,7 @@ class AstrionApp : Application() {
             SpeakerGroupCard(),
             SourceSelectCard(),
             VacuumCard(),
+            ConditionalCard(),
             // ← register your own card types here
         )
     }

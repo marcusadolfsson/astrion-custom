@@ -1,6 +1,9 @@
 package com.custom.astrion.cards
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import com.custom.astrion.ha.EntityMap
 import com.custom.astrion.ha.HaClient
 
@@ -43,13 +46,33 @@ data class CardConfig(
  * Context handed to every card render. Gives the card read access to live
  * entity states and the ability to fire service calls back to HA.
  */
+/*
+ * PERFORMANCE — why this is @Stable and why the instance must be remembered:
+ *
+ * Compose skips a composable only when its parameters compare equal. An unstable
+ * parameter (this class, holding a Map) is compared by INSTANCE, so allocating a
+ * fresh CardContext on every entity update meant no card could ever skip — every
+ * visible card re-executed up to 8x/second (the publish rate) whenever any
+ * subscribed entity changed, on a 1 GB MT6580.
+ *
+ * Now `entities` is a SnapshotStateMap and this context is remembered, so the
+ * instance is stable. Reading `ctx.entities[id]` inside composition subscribes to
+ * THAT KEY ONLY, so an entity change recomposes just the cards that read it.
+ * Keep it that way: never iterate the whole map inside composition (values/keys/
+ * forEach) — that would subscribe to every key and undo all of this.
+ */
+@Stable
 class CardContext(
     val entities: EntityMap,
     val client: HaClient,
     /** Section name a hardware key asked to "open" (a sole-in-section
-     *  bubble_select pops its dropdown when its `open_on` matches). */
-    val openTarget: String? = null,
-)
+     *  bubble_select pops its dropdown when its `open_on` matches). Held as
+     *  State so changing it doesn't change this context's identity — only the
+     *  cards that actually read it recompose. */
+    private val openTargetState: State<String?> = mutableStateOf(null),
+) {
+    val openTarget: String? get() = openTargetState.value
+}
 
 /**
  * Implement this to create a new native card type. `type` is the string you'll

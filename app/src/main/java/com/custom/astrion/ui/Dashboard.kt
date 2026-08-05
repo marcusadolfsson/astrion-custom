@@ -16,8 +16,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -35,7 +37,9 @@ import com.custom.astrion.cards.CardRegistry
 import com.custom.astrion.config.AppConfig
 import com.custom.astrion.config.PageConfig
 import com.custom.astrion.ha.ConnectionState
+import androidx.compose.runtime.snapshotFlow
 import com.custom.astrion.ha.EntityMap
+import com.custom.astrion.ha.EntityState
 import com.custom.astrion.ha.HaClient
 import kotlinx.coroutines.launch
 
@@ -73,10 +77,33 @@ fun Dashboard(
     /** Toggles the setup web server from the info panel. */
     onSetup: () -> Unit = {},
 ) {
-    val entities by entitiesState
     val connection by connectionState
-    val ctx = CardContext(entities = entities, client = client, openTarget = openTarget)
     val scope = rememberCoroutineScope()
+
+    // PERFORMANCE: deliberately do NOT read the entity map here. Reading it in
+    // this scope would recompose the entire dashboard (every card, both pages)
+    // on every publish tick. Instead the flow is drained OUTSIDE composition into
+    // a SnapshotStateMap, which Compose tracks per key — so an entity change
+    // recomposes only the cards that actually read that entity.
+    val entityMap = remember { mutableStateMapOf<String, EntityState>() }
+    LaunchedEffect(entitiesState) {
+        snapshotFlow { entitiesState.value }.collect { snapshot ->
+            // Touch only what actually changed; EntityState is a data class, so
+            // equality is by value and unchanged entities never notify readers.
+            for ((id, state) in snapshot) {
+                if (entityMap[id] != state) entityMap[id] = state
+            }
+            if (entityMap.size != snapshot.size) {
+                entityMap.keys.retainAll(snapshot.keys)
+            }
+        }
+    }
+
+    // Stable identity: allocating a new context per update was what stopped any
+    // card from skipping. openTarget rides in a State so it can change without
+    // changing this instance.
+    val openTargetState = rememberUpdatedState(openTarget)
+    val ctx = remember(client) { CardContext(entityMap, client, openTargetState) }
 
     // Give the sole-selector-in-section bubble a moment to see the open request,
     // then clear it so the next keypress re-triggers.
@@ -288,8 +315,8 @@ private fun PageContent(
 ) {
     // Cards with options["pin"] == "bottom" float at the bottom, always visible;
     // the rest scroll above them.
-    val pinned = page.cards.filter { it.options["pin"] == "bottom" }
-    val scrolling = page.cards.filter { it.options["pin"] != "bottom" }
+    val pinned = remember(page) { page.cards.filter { it.options["pin"] == "bottom" } }
+    val scrolling = remember(page) { page.cards.filter { it.options["pin"] != "bottom" } }
 
     val listState = rememberLazyListState()
     // Hardware "scroll to section": scroll so the matching separator sits at the
@@ -313,7 +340,12 @@ private fun PageContent(
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(scrolling) { RenderCard(it, ctx) }
+            // Index keys: the card list only changes when the layout syncs, and
+            // they keep LazyColumn reusing slots instead of re-composing on the
+            // list's identity.
+            items(scrolling.size, key = { it }) { i ->
+                RenderCard(scrolling[i], ctx)
+            }
         }
         if (pinned.isNotEmpty()) {
             Column(

@@ -46,6 +46,9 @@ data class CardConfig(
 class CardContext(
     val entities: EntityMap,
     val client: HaClient,
+    /** Section name a hardware key asked to "open" (a sole-in-section
+     *  bubble_select pops its dropdown when its `open_on` matches). */
+    val openTarget: String? = null,
 )
 
 /**

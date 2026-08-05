@@ -54,11 +54,23 @@ fun Dashboard(
     /** Section (separator name) to scroll the current page to; consumed via onScrollHandled. */
     scrollTarget: String? = null,
     onScrollHandled: () -> Unit = {},
+    /** Section a hardware key asked to "open" (auto-pops a sole selector); consumed via onOpenHandled. */
+    openTarget: String? = null,
+    onOpenHandled: () -> Unit = {},
 ) {
     val entities by entitiesState
     val connection by connectionState
-    val ctx = CardContext(entities = entities, client = client)
+    val ctx = CardContext(entities = entities, client = client, openTarget = openTarget)
     val scope = rememberCoroutineScope()
+
+    // Give the sole-selector-in-section bubble a moment to see the open request,
+    // then clear it so the next keypress re-triggers.
+    LaunchedEffect(openTarget) {
+        if (openTarget != null) {
+            kotlinx.coroutines.delay(500)
+            onOpenHandled()
+        }
+    }
 
     val pageCount = config.pages.size.coerceAtLeast(1)
     val pagerState = rememberPagerState(

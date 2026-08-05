@@ -73,13 +73,17 @@ class MediaPlayerCard : CardRenderer {
         val forwardBtn = config.options["forward"] as? Map<String, Any?>
         val e = ctx.entities[entityId]
         val playing = e?.state == "playing"
-        val title = e?.attrString("media_title")?.takeIf { it.isNotBlank() }
-            ?: e?.friendlyName ?: entityId
+        val realTitle = e?.attrString("media_title")?.takeIf { it.isNotBlank() }
+        val title = realTitle ?: e?.friendlyName ?: entityId
         val artist = e?.attrString("media_artist")
             ?: e?.attrString("media_series_title")
             ?: e?.attrString("app_name")
-            ?: "—"
-        val artPath = e?.attrString("entity_picture")
+        val artPath = e?.attrString("entity_picture")?.takeIf { it.isNotBlank() }
+
+        // Collapse the full card entirely when there's nothing to show — no real
+        // media title and no cover art (e.g. an idle source); otherwise it would
+        // just render the bare entity name over an empty box.
+        if (full && realTitle == null && artPath == null) return
 
         var art by remember(artPath) { mutableStateOf<ImageBitmap?>(null) }
         LaunchedEffect(artPath) { art = artPath?.let { ctx.client.fetchBitmap(it) } }
@@ -139,7 +143,7 @@ class MediaPlayerCard : CardRenderer {
     @Composable
     private fun CompactContent(
         title: String,
-        artist: String,
+        artist: String?,
         art: ImageBitmap?,
         mp: (String, Array<out Pair<String, Any?>>) -> Unit,
     ) {
@@ -162,8 +166,10 @@ class MediaPlayerCard : CardRenderer {
             Column(Modifier.weight(1f)) {
                 Text(title, color = Color(0xFFF1F4FA), fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(artist, color = Color(0xFFB6BECC), fontSize = 12.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (!artist.isNullOrBlank()) {
+                    Text(artist, color = Color(0xFFB6BECC), fontSize = 12.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             // Only volume, sitting at the right after the weighted text.
             CircleControl(Icons.Filled.VolumeDown, 40.dp) { mp("volume_down", emptyArray()) }
@@ -176,7 +182,7 @@ class MediaPlayerCard : CardRenderer {
     private fun FullContent(
         ctx: CardContext,
         title: String,
-        artist: String,
+        artist: String?,
         playing: Boolean,
         art: ImageBitmap?,
         mp: (String, Array<out Pair<String, Any?>>) -> Unit,
@@ -230,28 +236,39 @@ class MediaPlayerCard : CardRenderer {
                 Text(title, color = Color(0xFFF1F4FA), fontSize = 20.sp, fontWeight = FontWeight.Bold,
                     maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth())
-                Text(artist, color = Color(0xFFB6BECC), fontSize = 14.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth())
+                if (!artist.isNullOrBlank()) {
+                    Text(artist, color = Color(0xFFB6BECC), fontSize = 14.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth())
+                }
             }
-            // Transport row: [reverse] prev-chapter play/pause next-chapter [forward].
-            // Volume lives on the hardware keys, not here. Reverse/forward show
-            // only when the card configures them (e.g. Kaleidescape scan).
+            // Transport row: [reverse] play/pause [forward] — all one size. Chapter
+            // skip removed; volume is on the hardware keys. Reverse/forward show
+            // only when configured (e.g. Kaleidescape scan). While scanning, the
+            // centre button shows Play (not Pause) so a tap resumes normal play.
+            var scanning by remember(title) { mutableStateOf(false) }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 reverseBtn?.let { b ->
-                    CircleControl(Icons.Filled.FastRewind, 52.dp) { fireService(ctx, b) }
+                    CircleControl(Icons.Filled.FastRewind, 70.dp) { scanning = true; fireService(ctx, b) }
                 }
-                CircleControl(Icons.Filled.SkipPrevious, 62.dp) { mp("media_previous_track", emptyArray()) }
-                CircleControl(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, 70.dp, accent = true) {
-                    mp("media_play_pause", emptyArray())
+                CircleControl(
+                    if (playing && !scanning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    70.dp,
+                    accent = true,
+                ) {
+                    if (scanning) {
+                        scanning = false
+                        mp("media_play", emptyArray())
+                    } else {
+                        mp("media_play_pause", emptyArray())
+                    }
                 }
-                CircleControl(Icons.Filled.SkipNext, 62.dp) { mp("media_next_track", emptyArray()) }
                 forwardBtn?.let { b ->
-                    CircleControl(Icons.Filled.FastForward, 52.dp) { fireService(ctx, b) }
+                    CircleControl(Icons.Filled.FastForward, 70.dp) { scanning = true; fireService(ctx, b) }
                 }
             }
         }

@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.custom.astrion.cards.CardConfig
@@ -40,9 +41,13 @@ import com.custom.astrion.ha.ServiceCall
  * buttons), so it drives script-based selectors (Activity, Brightness, Screen
  * size, Light Scenes) while `active_entity` supplies the current value.
  *
+ * `open_on`: when set to a section (separator) name, the dropdown auto-opens
+ * when a hardware key scrolls to that section — for sections with a single
+ * selector, so one keypress lands right on the options.
+ *
  * Config:
  *   { "type": "bubble_select", "options": {
- *       "name": "Activity", "icon": "tv",
+ *       "name": "Activity", "icon": "tv", "open_on": "Watch",
  *       "active_entity": "input_select.lr_av_activity",
  *       "options": [
  *         { "name": "Apple TV", "service": "script.lr_av_watch_apple_tv",
@@ -58,6 +63,7 @@ class BubbleSelectCard : CardRenderer {
         val icon = CardIcons.forName(config.string("icon"))
         val activeEntity = config.string("active_entity")
         val options = (config.options["options"] as? List<Map<String, Any?>>) ?: emptyList()
+        val openOn = config.string("open_on")
 
         val currentState = activeEntity?.let { ctx.entities[it]?.state }
         val currentName = (options.firstOrNull { it["active_value"] == currentState }?.get("name") as? String)
@@ -65,7 +71,15 @@ class BubbleSelectCard : CardRenderer {
 
         var expanded by remember { mutableStateOf(false) }
 
-        Box {
+        // When a hardware key scrolls to this bubble's (single-control) section,
+        // pop the dropdown open too — the section name comes in via openTarget.
+        LaunchedEffect(ctx.openTarget) {
+            if (openOn != null && ctx.openTarget?.equals(openOn, ignoreCase = true) == true) {
+                expanded = true
+            }
+        }
+
+        Box(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -83,29 +97,34 @@ class BubbleSelectCard : CardRenderer {
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     if (name.isNotBlank()) {
-                        Text(name, color = Color(0xFF93AFB6), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(name, color = Color(0xFF93AFB6), fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     }
-                    Text(currentName, color = Color(0xFFF1F4FA), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Text(currentName, color = Color(0xFFF1F4FA), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Icon(Icons.Filled.ExpandMore, contentDescription = null, tint = Color(0xFF93AFB6))
             }
 
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                options.forEach { opt ->
-                    val label = opt["name"] as? String ?: return@forEach
-                    val selected = opt["active_value"] == currentState
-                    DropdownMenuItem(
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
-                        text = {
-                            Text(
-                                label,
-                                fontSize = 24.sp,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (selected) Color(0xFF2E7D95) else Color.Unspecified,
-                            )
-                        },
-                        onClick = { expanded = false; fire(ctx, opt) },
-                    )
+            // Right-aligned dropdown with large touch targets (fat-finger sized).
+            Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    options.forEach { opt ->
+                        val label = opt["name"] as? String ?: return@forEach
+                        val selected = opt["active_value"] == currentState
+                        DropdownMenuItem(
+                            contentPadding = PaddingValues(horizontal = 28.dp, vertical = 16.dp),
+                            text = {
+                                Text(
+                                    label,
+                                    fontSize = 30.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (selected) Color(0xFF2E7D95) else Color.Unspecified,
+                                    textAlign = TextAlign.End,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            },
+                            onClick = { expanded = false; fire(ctx, opt) },
+                        )
+                    }
                 }
             }
         }

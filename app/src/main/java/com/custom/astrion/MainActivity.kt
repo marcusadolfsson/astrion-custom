@@ -94,6 +94,9 @@ class MainActivity : ComponentActivity() {
     /** Section (separator name) to scroll to; consumed by the Dashboard. */
     private var scrollTarget by mutableStateOf<String?>(null)
 
+    /** Section whose sole selector should auto-open; consumed by the Dashboard. */
+    private var openTarget by mutableStateOf<String?>(null)
+
     private val storagePermission = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { reloadDashboard() }
@@ -140,6 +143,8 @@ class MainActivity : ComponentActivity() {
                 onNavHandled = { navTarget = null },
                 scrollTarget = scrollTarget,
                 onScrollHandled = { scrollTarget = null },
+                openTarget = openTarget,
+                onOpenHandled = { openTarget = null },
             )
         }
     }
@@ -191,6 +196,7 @@ class MainActivity : ComponentActivity() {
         }
         hk.scrollTo?.let {
             scrollTarget = it
+            openTarget = it
             handled = true
         }
         hk.service?.let { service ->

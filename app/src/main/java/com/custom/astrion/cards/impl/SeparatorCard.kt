@@ -33,10 +33,10 @@ class SeparatorCard : CardRenderer {
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, tint = Color(0xFF7FB3C4), modifier = Modifier.size(18.dp))
+            Icon(icon, contentDescription = null, tint = Color(0xFF7FB3C4), modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(8.dp))
             if (name.isNotBlank()) {
-                Text(name, color = Color(0xFF9FC0CB), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(name, color = Color(0xFF9FC0CB), fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(10.dp))
             }
             Box(Modifier.weight(1f).height(1.dp).background(Color(0x33FFFFFF)))

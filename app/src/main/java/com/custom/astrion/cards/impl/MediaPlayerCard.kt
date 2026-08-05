@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -65,9 +67,14 @@ class MediaPlayerCard : CardRenderer {
         val entityId = config.string("entity_id") ?: return
         val full = config.string("variant") == "full"
         val topButtons = (config.options["top_buttons"] as? List<Map<String, Any?>>) ?: emptyList()
+        // Optional reverse/forward transport buttons (e.g. Kaleidescape scan),
+        // each an action map {service, entity_id, data}. Shown only when set.
+        val reverseBtn = config.options["reverse"] as? Map<String, Any?>
+        val forwardBtn = config.options["forward"] as? Map<String, Any?>
         val e = ctx.entities[entityId]
         val playing = e?.state == "playing"
-        val title = e?.attrString("media_title") ?: e?.friendlyName ?: entityId
+        val title = e?.attrString("media_title")?.takeIf { it.isNotBlank() }
+            ?: e?.friendlyName ?: entityId
         val artist = e?.attrString("media_artist")
             ?: e?.attrString("media_series_title")
             ?: e?.attrString("app_name")
@@ -109,7 +116,7 @@ class MediaPlayerCard : CardRenderer {
             }
 
             if (full) {
-                FullContent(ctx, title, artist, playing, art, ::mp, topButtons)
+                FullContent(ctx, title, artist, playing, art, ::mp, topButtons, reverseBtn, forwardBtn)
             } else {
                 CompactContent(title, artist, art, ::mp)
             }
@@ -174,6 +181,8 @@ class MediaPlayerCard : CardRenderer {
         art: ImageBitmap?,
         mp: (String, Array<out Pair<String, Any?>>) -> Unit,
         topButtons: List<Map<String, Any?>>,
+        reverseBtn: Map<String, Any?>?,
+        forwardBtn: Map<String, Any?>?,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -225,19 +234,25 @@ class MediaPlayerCard : CardRenderer {
                     maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth())
             }
-            // Single control row: vol- prev play/pause next vol+, justified.
+            // Transport row: [reverse] prev-chapter play/pause next-chapter [forward].
+            // Volume lives on the hardware keys, not here. Reverse/forward show
+            // only when the card configures them (e.g. Kaleidescape scan).
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CircleControl(Icons.Filled.VolumeDown, 48.dp) { mp("volume_down", emptyArray()) }
-                CircleControl(Icons.Filled.SkipPrevious, 52.dp) { mp("media_previous_track", emptyArray()) }
-                CircleControl(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, 68.dp, accent = true) {
+                reverseBtn?.let { b ->
+                    CircleControl(Icons.Filled.FastRewind, 52.dp) { fireService(ctx, b) }
+                }
+                CircleControl(Icons.Filled.SkipPrevious, 62.dp) { mp("media_previous_track", emptyArray()) }
+                CircleControl(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, 70.dp, accent = true) {
                     mp("media_play_pause", emptyArray())
                 }
-                CircleControl(Icons.Filled.SkipNext, 52.dp) { mp("media_next_track", emptyArray()) }
-                CircleControl(Icons.Filled.VolumeUp, 48.dp) { mp("volume_up", emptyArray()) }
+                CircleControl(Icons.Filled.SkipNext, 62.dp) { mp("media_next_track", emptyArray()) }
+                forwardBtn?.let { b ->
+                    CircleControl(Icons.Filled.FastForward, 52.dp) { fireService(ctx, b) }
+                }
             }
         }
     }

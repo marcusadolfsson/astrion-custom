@@ -137,6 +137,33 @@ Three additions to the hotkey table, all combinable:
 { "key": "VOICE", "action": "sync" }
 ```
 
+### Volume / mute overlay
+
+A transient on-screen readout — the remote's own OSD — so a volume press gives
+feedback in your hand instead of only on the TV. A centred pill (speaker icon,
+percentage or **Muted**, level bar) fades in on a change and hides after 1.5 s.
+
+```json
+"overlay": {
+  "volume_entity": "input_number.sonos_volume_cache",
+  "mute_entity": "media_player.living_room"
+}
+```
+
+Top-level in the layout, alongside `pages` and `hotkeys`.
+
+> **Point `volume_entity` at whatever is stepped *immediately* on the button
+> press** — e.g. an `input_number` your volume scripts write — **not** the media
+> player's `volume_level`. A speaker's state feedback lags by enough to make the
+> overlay feel broken.
+
+`mute_entity` is read for the `is_volume_muted` attribute.
+
+Two implementation notes if you extend this: the overlay's entities are collected
+explicitly by `EntityRefs` because they are read outside any card (the filtered
+subscription would otherwise never deliver them), and it deliberately ignores the
+first values it sees so opening the app doesn't flash it.
+
 ---
 
 ## Runtime configuration

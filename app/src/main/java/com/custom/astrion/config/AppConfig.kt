@@ -16,6 +16,23 @@ data class AppConfig(
     val hotkeys: List<HotkeyConfig> = emptyList(),
     /** Long-press (~500ms hold) button bindings — same shape as hotkeys. */
     val longHotkeys: List<HotkeyConfig> = emptyList(),
+    /** Optional transient volume/mute overlay. */
+    val overlay: OverlayConfig? = null,
+)
+
+/**
+ * Transient on-screen readout shown when the volume or mute state changes —
+ * the remote's own OSD, so a volume press gives feedback without looking up at
+ * the TV.
+ *
+ * `volumeEntity` should be whatever is stepped *immediately* on the button press
+ * (e.g. an input_number the volume scripts write), not the media player's own
+ * volume_level, which lags behind the speaker's state feedback.
+ */
+data class OverlayConfig(
+    val volumeEntity: String? = null,
+    /** Entity carrying `is_volume_muted` (typically the media_player). */
+    val muteEntity: String? = null,
 )
 
 /** One swipeable page: a name (used by hotkey `page` navigation) and its cards. */

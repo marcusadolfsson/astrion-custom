@@ -1,5 +1,10 @@
 package com.custom.astrion.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -10,7 +15,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +45,7 @@ import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRegistry
 import com.custom.astrion.config.AppConfig
+import com.custom.astrion.config.OverlayConfig
 import com.custom.astrion.config.PageConfig
 import com.custom.astrion.ha.ConnectionState
 import androidx.compose.runtime.snapshotFlow
@@ -170,6 +181,8 @@ fun Dashboard(
             )
         }
 
+        config.overlay?.let { VolumeOverlay(it, ctx) }
+
         if (showInfo) {
             InfoSheet(
                 haUrl = haUrl,
@@ -178,6 +191,89 @@ fun Dashboard(
                 onSync = { onSync(); showInfo = false },
                 onDismiss = { showInfo = false },
             )
+        }
+    }
+}
+
+/**
+ * Transient volume / mute readout — the remote's own OSD.
+ *
+ * Driven by whatever entity the volume buttons step IMMEDIATELY (an input_number
+ * the scripts write), not the media player's own volume_level: the speaker's
+ * state feedback lags by enough to make the overlay feel broken.
+ *
+ * Deliberately does not appear on first composition — only on an actual change —
+ * so opening the app doesn't flash it.
+ */
+@Composable
+private fun BoxScope.VolumeOverlay(cfg: OverlayConfig, ctx: CardContext) {
+    // Per-key reads: only this overlay recomposes when these change.
+    val vol = cfg.volumeEntity?.let { ctx.entities[it]?.state?.toFloatOrNull() }
+    val muted = cfg.muteEntity?.let { ctx.entities[it]?.attr("is_volume_muted") }
+        ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBoolean() }
+
+    var visible by remember { mutableStateOf(false) }
+    var lastVol by remember { mutableStateOf<Float?>(null) }
+    var lastMuted by remember { mutableStateOf<Boolean?>(null) }
+    var seeded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(vol, muted) {
+        val prevV = lastVol
+        val prevM = lastMuted
+        lastVol = vol
+        lastMuted = muted
+        if (!seeded) { seeded = true; return@LaunchedEffect }   // first values: don't flash
+        if (vol == prevV && muted == prevM) return@LaunchedEffect
+        visible = true
+        kotlinx.coroutines.delay(1500)
+        visible = false
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(120)) + scaleIn(tween(140), initialScale = 0.88f),
+        exit = fadeOut(tween(220)),
+        modifier = Modifier.align(Alignment.Center),
+    ) {
+        val pct = (vol ?: 0f).coerceIn(0f, 100f)
+        val isMuted = muted == true
+        Column(
+            modifier = Modifier
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xE60E2229))
+                .padding(horizontal = 26.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                if (isMuted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+                contentDescription = null,
+                tint = if (isMuted) Color(0xFFE08A8A) else Color(0xFF7FD8F0),
+                modifier = Modifier.size(44.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                if (isMuted) "Muted" else "${pct.toInt()}%",
+                color = Color(0xFFF1F4FA),
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(12.dp))
+            // Level bar — dimmed while muted so the value is still readable.
+            Box(
+                modifier = Modifier
+                    .width(150.dp)
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color(0xFF2A4954)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth((pct / 100f).coerceIn(0.02f, 1f))
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(if (isMuted) Color(0xFF41606B) else Color(0xFF2E7D95)),
+                )
+            }
         }
     }
 }

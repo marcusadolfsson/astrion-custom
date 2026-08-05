@@ -116,7 +116,13 @@ object DashboardLoader {
                 val start = (root["startPage"] as? JsonPrimitive)?.intOrNull ?: 0
                 val hotkeys = (root["hotkeys"] as? JsonArray)?.map { parseHotkey(it as JsonObject) } ?: emptyList()
                 val longHotkeys = (root["longHotkeys"] as? JsonArray)?.map { parseHotkey(it as JsonObject) } ?: emptyList()
-                AppConfig(pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys)
+                val overlay = (root["overlay"] as? JsonObject)?.let { o ->
+                    OverlayConfig(
+                        volumeEntity = (o["volume_entity"] as? JsonPrimitive)?.content,
+                        muteEntity = (o["mute_entity"] as? JsonPrimitive)?.content,
+                    )
+                }
+                AppConfig(pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys, overlay)
             }
             else -> error("top level must be an object or array")
         }
@@ -173,6 +179,12 @@ object DashboardLoader {
                 })
             }
         })
+        cfg.overlay?.let { o ->
+            put("overlay", buildJsonObject {
+                o.volumeEntity?.let { put("volume_entity", it) }
+                o.muteEntity?.let { put("mute_entity", it) }
+            })
+        }
         put("hotkeys", encodeHotkeys(cfg.hotkeys))
         put("longHotkeys", encodeHotkeys(cfg.longHotkeys))
     }

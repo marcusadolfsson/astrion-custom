@@ -27,6 +27,13 @@ object EntityRefs {
         config.pages.forEach { page ->
             page.cards.forEach { card -> walk(card.options, out) }
         }
+        // The overlay reads these outside any card, so collect them explicitly —
+        // otherwise the filtered subscription would never deliver their updates.
+        config.overlay?.let { o ->
+            listOfNotNull(o.volumeEntity, o.muteEntity).forEach {
+                if (ENTITY_ID.matches(it)) out.add(it)
+            }
+        }
         (config.hotkeys + config.longHotkeys).forEach { hk ->
             hk.entityId?.let { if (ENTITY_ID.matches(it)) out.add(it) }
             walk(hk.data, out)

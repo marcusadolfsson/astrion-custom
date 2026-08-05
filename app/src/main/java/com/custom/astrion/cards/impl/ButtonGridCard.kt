@@ -1,8 +1,10 @@
 package com.custom.astrion.cards.impl
 
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,13 +33,23 @@ import java.io.File
  * a text label, or both. Used for the TV-app row, Group/Ungroup, and the
  * playlist buttons.
  *
+ * SELECTED STATE: a button can reflect live HA state so the active choice is
+ * highlighted (e.g. the current AV activity, the current brightness mode). Give
+ * the card a default `active_entity`, and each button an `active_value`; a button
+ * whose `active_value` equals that entity's state renders highlighted (accent
+ * fill + border + bold). A button may override with its own `active_entity`.
+ *
+ * TOUCH TARGETS: `button_height` (dp) sets the row height for the whole grid;
+ * defaults are already finger-sized (64 dp text-only, 84 dp with an icon).
+ *
  * Config shape:
  *   { "type": "button_grid", "options": {
- *       "columns": 3,
+ *       "columns": 2,
+ *       "button_height": 76,
+ *       "active_entity": "input_select.lr_av_activity",
  *       "buttons": [
- *         { "name": "Group",   "service": "script.group" },
- *         { "name": "Disco",   "icon": "/sdcard/astrion/icons/disco.png",
- *           "service": "script.playlist_disco" },
+ *         { "name": "Apple TV", "service": "script.lr_av_watch_apple_tv",
+ *           "active_value": "Watch Apple TV" },
  *         { "name": "Netflix", "service": "media_player.play_media",
  *           "entity_id": "media_player.the_club_tvv",
  *           "data": { "media_content_type": "app", "media_content_id": "com.netflix.ninja" } }
@@ -52,6 +64,9 @@ class ButtonGridCard : CardRenderer {
     override fun Render(config: CardConfig, ctx: CardContext) {
         val columns = config.int("columns", 3).coerceAtLeast(1)
         val buttons = (config.options["buttons"] as? List<Map<String, Any?>>) ?: emptyList()
+        val cardActiveEntity = config.string("active_entity")
+        // 0 = "auto" (per-button default based on icon presence).
+        val buttonHeight = config.int("button_height", 0)
 
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             buttons.chunked(columns).forEach { row ->
@@ -60,7 +75,7 @@ class ButtonGridCard : CardRenderer {
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     row.forEach { b ->
-                        GridButton(b, Modifier.weight(1f)) { fire(ctx, b) }
+                        GridButton(b, ctx, cardActiveEntity, buttonHeight, Modifier.weight(1f)) { fire(ctx, b) }
                     }
                     repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                 }
@@ -81,7 +96,14 @@ class ButtonGridCard : CardRenderer {
     }
 
     @Composable
-    private fun GridButton(b: Map<String, Any?>, modifier: Modifier, onClick: () -> Unit) {
+    private fun GridButton(
+        b: Map<String, Any?>,
+        ctx: CardContext,
+        cardActiveEntity: String?,
+        buttonHeight: Int,
+        modifier: Modifier,
+        onClick: () -> Unit,
+    ) {
         val name = b["name"] as? String
         val iconPath = b["icon"] as? String
         val bitmap = remember(iconPath) {
@@ -94,26 +116,44 @@ class ButtonGridCard : CardRenderer {
         }
         val hasIcon = bitmap != null
 
+        // Selected when this button's active_value matches the live state of its
+        // active_entity (button-level override, else the card default).
+        val activeEntity = (b["active_entity"] as? String) ?: cardActiveEntity
+        val activeValue = b["active_value"] as? String
+        val active = activeEntity != null && activeValue != null &&
+            ctx.entities[activeEntity]?.state == activeValue
+
+        val height = when {
+            buttonHeight > 0 -> buttonHeight.dp
+            hasIcon -> 84.dp
+            else -> 64.dp
+        }
+        val bg = if (active) Color(0xFF2E7D95) else Color(0xFF2A4954)
+        val fg = if (active) Color.White else Color(0xFFE6F0F1)
+
+        var box = modifier
+            .height(height)
+            .clip(RoundedCornerShape(14.dp))
+            .background(bg)
+        if (active) box = box.border(2.dp, Color(0xFF7FD8F0), RoundedCornerShape(14.dp))
+
         Column(
-            modifier = modifier
-                .height(if (hasIcon) 68.dp else 48.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color(0xFF2A4954))
+            modifier = box
                 .clickable(onClick = onClick)
-                .padding(6.dp),
+                .padding(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
             if (bitmap != null) {
-                Image(bitmap = bitmap, contentDescription = name, modifier = Modifier.size(32.dp))
+                Image(bitmap = bitmap, contentDescription = name, modifier = Modifier.size(34.dp))
                 if (!name.isNullOrBlank()) Spacer(Modifier.height(4.dp))
             }
             if (!name.isNullOrBlank()) {
                 Text(
                     name,
-                    color = Color(0xFFE6F0F1),
-                    fontSize = if (hasIcon) 12.sp else 15.sp,
-                    fontWeight = FontWeight.Medium,
+                    color = fg,
+                    fontSize = if (hasIcon) 13.sp else 17.sp,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,

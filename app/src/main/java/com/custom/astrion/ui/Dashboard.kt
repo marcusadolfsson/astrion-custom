@@ -2,7 +2,9 @@ package com.custom.astrion.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -14,11 +16,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import com.custom.astrion.BuildConfig
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,6 +64,8 @@ fun Dashboard(
     /** Section a hardware key asked to "open" (auto-pops a sole selector); consumed via onOpenHandled. */
     openTarget: String? = null,
     onOpenHandled: () -> Unit = {},
+    /** Invoked when the user taps Sync in the swipe-up info panel. */
+    onSync: () -> Unit = {},
 ) {
     val entities by entitiesState
     val connection by connectionState
@@ -85,35 +94,101 @@ fun Dashboard(
         onNavHandled()
     }
 
-    Column(
+    var showInfo by remember { mutableStateOf(false) }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0E2229)),
     ) {
-        ConnectionBanner(connection)
-        if (configNotice != null) ConfigNoticeBanner(configNotice)
+        Column(modifier = Modifier.fillMaxSize()) {
+            ConnectionBanner(connection)
+            if (configNotice != null) ConfigNoticeBanner(configNotice)
 
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-        ) { pageIndex ->
-            // Only the settled/current page acts on a scroll request; other
-            // (pre-composed) pages get null so they don't consume it early.
-            PageContent(
-                config.pages[pageIndex],
-                ctx,
-                if (pageIndex == pagerState.currentPage) scrollTarget else null,
-                onScrollHandled,
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) { pageIndex ->
+                // Only the settled/current page acts on a scroll request; other
+                // (pre-composed) pages get null so they don't consume it early.
+                PageContent(
+                    config.pages[pageIndex],
+                    ctx,
+                    if (pageIndex == pagerState.currentPage) scrollTarget else null,
+                    onScrollHandled,
+                )
+            }
+
+            PageIndicator(
+                pages = config.pages,
+                current = pagerState.currentPage,
+                onDotClick = { i -> scope.launch { pagerState.animateScrollToPage(i) } },
+                onSwipeUp = { showInfo = true },
             )
         }
 
-        PageIndicator(
-            pages = config.pages,
-            current = pagerState.currentPage,
-            onDotClick = { i -> scope.launch { pagerState.animateScrollToPage(i) } },
-        )
+        if (showInfo) {
+            InfoSheet(onSync = { onSync(); showInfo = false }, onDismiss = { showInfo = false })
+        }
+    }
+}
+
+/**
+ * Swipe-up info panel: current build, the HA endpoint, and a manual Sync button.
+ * Dismisses on scrim tap. Replaces the previous sync-on-every-resume behaviour.
+ */
+@Composable
+private fun InfoSheet(onSync: () -> Unit, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xAA000000))
+            .clickable(onClick = onDismiss),
+    ) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                .background(Color(0xFF16303A))
+                // Absorb taps so they don't fall through to the dismiss scrim.
+                .clickable(enabled = false) {}
+                .padding(horizontal = 22.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .width(44.dp)
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color(0xFF33525E)),
+            )
+            Text("Astrion Custom", color = Color(0xFFF1F4FA), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            InfoRow("Build", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            InfoRow("Home Assistant", BuildConfig.HA_URL)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF2E7D95))
+                    .clickable(onClick = onSync),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Sync dashboard", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Color(0xFF93AFB6), fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(value, color = Color(0xFFE6F0F1), fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -182,32 +257,52 @@ private fun PageIndicator(
     pages: List<PageConfig>,
     current: Int,
     onDotClick: (Int) -> Unit,
+    onSwipeUp: () -> Unit = {},
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 5.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
+            // Swipe up anywhere along the bottom bar to open the info/sync panel.
+            .pointerInput(Unit) {
+                detectVerticalDragGestures { change, dragAmount ->
+                    if (dragAmount < -6f) {
+                        change.consume()
+                        onSwipeUp()
+                    }
+                }
+            }
+            .padding(top = 4.dp, bottom = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        pages.forEachIndexed { i, _ ->
-            val active = i == current
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 5.dp)
-                    .size(if (active) 10.dp else 8.dp)
-                    .clip(CircleShape)
-                    .background(if (active) Color(0xFF6EA8FE) else Color(0xFF33525E))
-                    .clickable { onDotClick(i) },
+        // Grab-handle hint.
+        Box(
+            modifier = Modifier
+                .width(40.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color(0xFF33525E)),
+        )
+        Spacer(Modifier.height(5.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            pages.forEachIndexed { i, _ ->
+                val active = i == current
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 5.dp)
+                        .size(if (active) 10.dp else 8.dp)
+                        .clip(CircleShape)
+                        .background(if (active) Color(0xFF6EA8FE) else Color(0xFF33525E))
+                        .clickable { onDotClick(i) },
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                pages.getOrNull(current)?.name ?: "",
+                color = Color(0xFF93AFB6),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
             )
         }
-        Spacer(Modifier.width(10.dp))
-        Text(
-            pages.getOrNull(current)?.name ?: "",
-            color = Color(0xFF93AFB6),
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-        )
     }
 }
 

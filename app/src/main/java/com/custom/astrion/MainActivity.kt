@@ -129,6 +129,8 @@ class MainActivity : ComponentActivity() {
         client = HaClient(baseUrl = BuildConfig.HA_URL, token = BuildConfig.HA_TOKEN)
         bindHotkeys(dashboard.config.hotkeys, dashboard.config.longHotkeys)
         client.connect()
+        // One pull from HA on cold launch; after that it's on-demand (info panel / VOICE).
+        syncFromHa()
 
         setContent {
             val entities = client.entities.collectAsState()
@@ -145,16 +147,17 @@ class MainActivity : ComponentActivity() {
                 onScrollHandled = { scrollTarget = null },
                 openTarget = openTarget,
                 onOpenHandled = { openTarget = null },
+                onSync = { syncFromHa(manual = true) },
             )
         }
     }
 
     override fun onResume() {
         super.onResume()
-        // Show the cached layout instantly, then pull the latest from HA so
-        // layout edits land without adb — just edit the file in HA.
+        // Re-read the local cache on foreground (instant, no network). Pulling
+        // from HA is now on-demand — swipe up for the info panel's Sync button,
+        // or the VOICE hotkey — not on every resume.
         reloadDashboard()
-        syncFromHa()
     }
 
     /** Load config from the local cache and (re)bind hotkeys. Synchronous — tiny file. */

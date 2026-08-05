@@ -49,7 +49,10 @@ class SourceSelectCard : CardRenderer {
         val entityId = config.string("entity_id") ?: return
         val e = ctx.entities[entityId]
         val name = config.string("name") ?: e?.friendlyName ?: entityId
-        val sources = e?.attrStringList("source_list") ?: emptyList()
+        // Keyed on the raw attribute: this re-walked the JsonArray and allocated a
+        // 50-150 string list on EVERY recomposition.
+        val sourceListAttr = e?.attr("source_list")
+        val sources = remember(sourceListAttr) { e?.attrStringList("source_list") ?: emptyList() }
         val current = e?.attrString("source")
 
         var expanded by remember { mutableStateOf(false) }

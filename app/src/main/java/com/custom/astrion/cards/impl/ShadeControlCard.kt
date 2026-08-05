@@ -66,9 +66,12 @@ class ShadeControlCard : CardRenderer {
         val e = targetEntity?.let { ctx.entities[it] }
         val current = e?.state ?: "—"
         // Options come straight from the input_select, so HA stays the source of truth.
-        val options: List<String> = (e?.attr("options") as? JsonArray)
-            ?.mapNotNull { (it as? JsonPrimitive)?.content }
-            ?: emptyList()
+        // Keyed on the raw attribute so the list is rebuilt only when HA actually
+        // changes it — not on every recomposition (and not while it's closed).
+        val optionsAttr = e?.attr("options")
+        val options: List<String> = remember(optionsAttr) {
+            (optionsAttr as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+        }
 
         var expanded by remember { mutableStateOf(false) }
 

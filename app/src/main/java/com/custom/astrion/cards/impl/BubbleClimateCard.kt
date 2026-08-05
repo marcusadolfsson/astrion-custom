@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -91,11 +92,16 @@ class BubbleClimateCard : CardRenderer {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
+                // Built once per value change: buildString + String.format ran on
+                // every recomposition, and String.format re-parses its pattern.
+                val label = remember(target, current) {
                     buildString {
                         append(target?.let { "${fmt(it)}°" } ?: "—")
                         current?.let { append("  ·  now ${fmt(it)}°") }
-                    },
+                    }
+                }
+                Text(
+                    label,
                     // Tinted by hvac_action so "is it actually cooling?" is still
                     // visible now that the coloured icon is gone.
                     color = if (action == "cooling" || action == "heating") accent else Color(0xFFF1F4FA),
@@ -114,8 +120,13 @@ class BubbleClimateCard : CardRenderer {
     }
 
     /** Whole degrees render without a trailing .0; halves keep one decimal. */
-    private fun fmt(v: Double): String =
-        if (v == v.roundToInt().toDouble()) v.roundToInt().toString() else String.format("%.1f", v)
+    private fun fmt(v: Double): String {
+        val whole = v.roundToInt()
+        if (v == whole.toDouble()) return whole.toString()
+        // One decimal without String.format (which re-parses its pattern each call).
+        val tenths = kotlin.math.round(v * 10).toInt()
+        return "${tenths / 10}.${kotlin.math.abs(tenths % 10)}"
+    }
 
     private fun num(el: kotlinx.serialization.json.JsonElement): Double? =
         (el as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()

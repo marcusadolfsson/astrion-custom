@@ -24,6 +24,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,19 +90,27 @@ class MediaPlayerCard : CardRenderer {
         var art by remember(artPath) { mutableStateOf<ImageBitmap?>(null) }
         LaunchedEffect(artPath) { art = artPath?.let { ctx.client.fetchBitmap(it) } }
 
-        val blurredBg = remember(art) {
-            art?.let { img ->
-                val src = img.asAndroidBitmap()
-                if (src.width <= 0) return@let null
-                val w = 32
-                val h = (w * src.height / src.width).coerceAtLeast(1)
-                Bitmap.createScaledBitmap(src, w, h, true).asImageBitmap()
+        // Downscale off the main thread: this ran inside remember{}, i.e. during
+        // composition on the UI thread — a filtered scale of full-size album art.
+        var blurredBg by remember(art) { mutableStateOf<ImageBitmap?>(null) }
+        LaunchedEffect(art) {
+            blurredBg = art?.let { img ->
+                withContext(Dispatchers.Default) {
+                    val src = img.asAndroidBitmap()
+                    if (src.width <= 0) return@withContext null
+                    val w = 32
+                    val h = (w * src.height / src.width).coerceAtLeast(1)
+                    Bitmap.createScaledBitmap(src, w, h, true).asImageBitmap()
+                }
             }
         }
 
-        fun mp(service: String, vararg data: Pair<String, Any?>) {
-            ctx.client.callService(ServiceCall.of("media_player", service, entityId, *data))
-        }
+        val mp: (String, Array<out Pair<String, Any?>>) -> Unit =
+            remember(entityId) {
+                { service, data ->
+                    ctx.client.callService(ServiceCall.of("media_player", service, entityId, *data))
+                }
+            }
 
         Box(
             modifier = Modifier
@@ -109,20 +119,23 @@ class MediaPlayerCard : CardRenderer {
                 .background(Color(0xFF1B343D)),
         ) {
             // Blurred album art background + scrim for legibility.
+            // Alpha instead of a separate full-size scrim Box — same look, one
+            // fewer full-card layer to composite on a Mali-400 with no fillrate
+            // headroom (was art + scrim + content = 3 layers).
             blurredBg?.let { bg ->
                 Image(
                     bitmap = bg,
                     contentDescription = null,
                     modifier = Modifier.matchParentSize(),
                     contentScale = ContentScale.Crop,
+                    alpha = 0.30f,
                 )
-                Box(modifier = Modifier.matchParentSize().background(Color(0xB30D1E24)))
             }
 
             if (full) {
-                FullContent(ctx, title, artist, playing, art, ::mp, topButtons, reverseBtn, forwardBtn)
+                FullContent(ctx, title, artist, playing, art, mp, topButtons, reverseBtn, forwardBtn)
             } else {
-                CompactContent(title, artist, art, ::mp)
+                CompactContent(title, artist, art, mp)
             }
         }
     }

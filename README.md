@@ -182,17 +182,15 @@ panel.
 
 ### 7. Add your layout
 
-The app fetches a JSON layout from Home Assistant. The quickest route is HA's
-`www/` folder, which is served at `/local/`:
+The app fetches a JSON layout from Home Assistant over the connection you just
+configured. **This fork ships `REMOTE_PATH = "/api/astrion_dashboard"`**, so the
+path of least resistance — and the only one that needs no rebuild if you're on
+the prebuilt APK — is to install [the companion component](#the-home-assistant-portion-optional-but-recommended)
+below and author the layout in YAML.
 
-```sh
-# convert examples/dashboard.yaml to JSON, then:
-cp dashboard.json /config/www/astrion/dashboard.json
-```
-
-…and set `DashboardLoader.REMOTE_PATH = "/local/astrion/dashboard.json"`.
-
-**Better:** install the companion component below and keep the layout in YAML.
+If you'd rather serve a plain JSON file from HA's `www/` folder (`/local/…`)
+instead, that means changing `DashboardLoader.REMOTE_PATH` — a code change, so
+it only applies if you're building from source.
 
 Sync to the remote any time from the **swipe-up panel → Sync**, or a hotkey with
 `"action": "sync"`. The layout is cached on the device, so the remote still works

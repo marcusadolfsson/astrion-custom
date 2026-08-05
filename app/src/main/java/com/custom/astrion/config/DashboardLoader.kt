@@ -45,12 +45,14 @@ object DashboardLoader {
     private const val TAG = "DashboardLoader"
 
     /**
-     * HA-served location of the master layout: /config/www/astrion/dashboard.json
-     * -> http://<ha>/local/astrion/dashboard.json. The app syncs this over the
-     * HA connection into the local cache file below, so layout edits no longer
-     * need `adb push` — edit the file in HA and the app pulls it on next sync.
+     * HA-served location of the master layout. The layout is authored as YAML
+     * (astrion/dashboard.yaml — comments, HA-native, !include-able) and the
+     * custom_components/astrion_dashboard component serves it as JSON here, so
+     * the app needs no YAML parser and there is no generated file to fall out of
+     * sync. Unlike the old /local/astrion/dashboard.json this endpoint requires
+     * auth — fetchText already sends the bearer token.
      */
-    const val REMOTE_PATH = "/local/astrion/dashboard.json"
+    const val REMOTE_PATH = "/api/astrion_dashboard"
 
     /** Local cache, written by a successful sync; used offline / before first sync. */
     val configFile: File

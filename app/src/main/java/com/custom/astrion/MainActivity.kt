@@ -27,6 +27,7 @@ import com.custom.astrion.config.ConfigServer
 import com.custom.astrion.config.ConnectionConfig
 import com.custom.astrion.config.DashboardConfig
 import com.custom.astrion.config.DashboardLoader
+import com.custom.astrion.config.EntityRefs
 import com.custom.astrion.config.HotkeyConfig
 import com.custom.astrion.config.JsonPlain
 import com.custom.astrion.ha.HaClient
@@ -148,6 +149,9 @@ class MainActivity : ComponentActivity() {
         }
         client = HaClient(baseUrl = conn.url, token = conn.token)
         bindHotkeys(dashboard.config.hotkeys, dashboard.config.longHotkeys)
+        // Load the cached layout first so the initial subscribe is already
+        // filtered — avoids a 0.7 MB whole-instance seed on every launch.
+        reloadDashboard()
         if (conn.isComplete) {
             client.connect()
             // One pull from HA on cold launch; after that it's on-demand (panel / VOICE).
@@ -220,11 +224,20 @@ class MainActivity : ComponentActivity() {
         reloadDashboard()
     }
 
-    /** Load config from the local cache and (re)bind hotkeys. Synchronous — tiny file. */
+    /** Load config from the local cache and apply it. Synchronous — tiny file. */
     private fun reloadDashboard() {
-        val result = DashboardLoader.load()
+        applyDashboard(DashboardLoader.load())
+    }
+
+    /**
+     * Adopt a layout: bind its hotkeys and narrow the live entity subscription to
+     * just the entities it references (see EntityRefs) — otherwise the client
+     * would track all ~1,650 entities on this HA to render about 30.
+     */
+    private fun applyDashboard(result: DashboardLoader.Result) {
         dashboard = result
         bindHotkeys(result.config.hotkeys, result.config.longHotkeys)
+        client.setSubscribedEntities(EntityRefs.collect(result.config))
     }
 
     /**
@@ -244,8 +257,7 @@ class MainActivity : ComponentActivity() {
                     text == null ->
                         if (manual) Toast.makeText(this, "Sync failed — HA unreachable", Toast.LENGTH_SHORT).show()
                     result != null -> {
-                        dashboard = result
-                        bindHotkeys(result.config.hotkeys, result.config.longHotkeys)
+                        applyDashboard(result)
                         if (manual) Toast.makeText(this, "Dashboard updated", Toast.LENGTH_SHORT).show()
                     }
                     else -> if (manual) Toast.makeText(this, "Already up to date", Toast.LENGTH_SHORT).show()

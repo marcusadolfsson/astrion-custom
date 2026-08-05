@@ -77,6 +77,12 @@ class HaClient(
     private val _connection = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connection: StateFlow<ConnectionState> = _connection.asStateFlow()
 
+    // Entities the current layout references. When set, we use HA's
+    // subscribe_entities (server-side filtered, compressed deltas) instead of
+    // pulling and tracking the whole instance. Empty = legacy whole-instance mode.
+    @Volatile private var subscribedEntities: Set<String> = emptySet()
+    @Volatile private var subId: Int? = null
+
     private val _entities = MutableStateFlow<EntityMap>(emptyMap())
     /** Live map of every entity's current state. Cards observe this. */
     val entities: StateFlow<EntityMap> = _entities.asStateFlow()
@@ -101,6 +107,27 @@ class HaClient(
         Log.i(TAG, "Connecting to $wsUrl")
         val req = Request.Builder().url(wsUrl).build()
         socket = http.newWebSocket(req, listener)
+    }
+
+    /**
+     * Limit the live subscription to these entities (from the loaded layout).
+     * Safe to call any time; re-subscribes in place if already connected.
+     */
+    fun setSubscribedEntities(ids: Collection<String>) {
+        val next = ids.toSet()
+        if (next == subscribedEntities) return
+        subscribedEntities = next
+        if (_connection.value == ConnectionState.CONNECTED) {
+            subId?.let { old ->
+                send(buildJsonObject {
+                    put("id", idCounter.getAndIncrement())
+                    put("type", "unsubscribe_events")
+                    put("subscription", old)
+                })
+            }
+            entityStore.keys.retainAll(next)
+            subscribe()
+        }
     }
 
     fun disconnect() {
@@ -295,8 +322,7 @@ class HaClient(
         Log.i(TAG, "Authenticated")
         _connection.value = ConnectionState.CONNECTED
         startPublisher()
-        requestStates()
-        subscribeStateChanges()
+        subscribe()
         startHeartbeat()
     }
 
@@ -313,6 +339,29 @@ class HaClient(
                 }
             }
         }
+    }
+
+    /**
+     * Preferred path: subscribe_entities with an entity_ids filter — HA sends one
+     * compact "add" payload for just those entities, then deltas. Falls back to
+     * the whole-instance get_states + subscribe_events only if the layout hasn't
+     * been parsed yet (so the app still works before the first config load).
+     */
+    private fun subscribe() {
+        val ids = subscribedEntities
+        if (ids.isEmpty()) {
+            requestStates()
+            subscribeStateChanges()
+            return
+        }
+        val id = idCounter.getAndIncrement()
+        subId = id
+        send(buildJsonObject {
+            put("id", id)
+            put("type", "subscribe_entities")
+            put("entity_ids", buildJsonArray { ids.forEach { add(JsonPrimitive(it)) } })
+        })
+        Log.i(TAG, "subscribed to ${ids.size} entities (filtered)")
     }
 
     private fun requestStates() {
@@ -363,9 +412,66 @@ class HaClient(
         _entities.value = HashMap(entityStore)
     }
 
-    /** state_changed events carry event.data.new_state. */
+    /**
+     * Handles BOTH subscription formats:
+     *  - subscribe_entities (compressed): event = { a: {...}, c: {...}, r: [...] }
+     *    where a=added (the initial seed + new entities), c=changed, r=removed.
+     *    Per entity: s=state, a=attributes, lc=last_changed, lu=last_updated; a
+     *    change is { "+": {partial}, "-": {a: [attrs to drop]} } and MERGES onto
+     *    what we already hold — HA only sends the delta.
+     *  - subscribe_events state_changed (legacy whole-instance): data.new_state.
+     */
     private fun onEvent(obj: JsonObject) {
-        val data = obj["event"]?.jsonObject?.get("data")?.jsonObject ?: return
+        val event = obj["event"]?.jsonObject ?: return
+
+        // ---- compressed (filtered) format ----
+        val added = event["a"] as? JsonObject
+        val changed = event["c"] as? JsonObject
+        val removed = event["r"] as? JsonArray
+        if (added != null || changed != null || removed != null) {
+            added?.forEach { (entityId, el) ->
+                val o = el as? JsonObject ?: return@forEach
+                entityStore[entityId] = EntityState(
+                    entityId = entityId,
+                    state = o["s"]?.jsonPrimitive?.contentOrNull ?: "unknown",
+                    attributes = o["a"] as? JsonObject ?: JsonObject(emptyMap()),
+                    lastChanged = o["lc"]?.jsonPrimitive?.contentOrNull,
+                    lastUpdated = o["lu"]?.jsonPrimitive?.contentOrNull,
+                )
+            }
+            changed?.forEach { (entityId, el) ->
+                val o = el as? JsonObject ?: return@forEach
+                val prev = entityStore[entityId]
+                val plus = o["+"] as? JsonObject
+                val minus = o["-"] as? JsonObject
+                // Merge attributes: start from what we have, apply +, drop -.
+                val attrs = LinkedHashMap<String, JsonElement>(prev?.attributes ?: emptyMap())
+                (plus?.get("a") as? JsonObject)?.forEach { (k, v) -> attrs[k] = v }
+                (minus?.get("a") as? JsonArray)?.forEach { rem ->
+                    (rem as? JsonPrimitive)?.contentOrNull?.let { attrs.remove(it) }
+                }
+                entityStore[entityId] = EntityState(
+                    entityId = entityId,
+                    state = plus?.get("s")?.jsonPrimitive?.contentOrNull ?: prev?.state ?: "unknown",
+                    attributes = JsonObject(attrs),
+                    lastChanged = plus?.get("lc")?.jsonPrimitive?.contentOrNull ?: prev?.lastChanged,
+                    lastUpdated = plus?.get("lu")?.jsonPrimitive?.contentOrNull ?: prev?.lastUpdated,
+                )
+            }
+            removed?.forEach { el ->
+                (el as? JsonPrimitive)?.contentOrNull?.let { entityStore.remove(it) }
+            }
+            // The first "a" batch IS the seed, so publish it straight away.
+            if (added != null && _entities.value.isEmpty()) {
+                _entities.value = HashMap(entityStore)
+            } else {
+                entitiesDirty = true
+            }
+            return
+        }
+
+        // ---- legacy state_changed ----
+        val data = event["data"]?.jsonObject ?: return
         val newState = data["new_state"] as? JsonObject ?: return
         val entityId = newState["entity_id"]?.jsonPrimitive?.content ?: return
         entityStore[entityId] = EntityState(

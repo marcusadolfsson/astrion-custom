@@ -7,9 +7,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-// Local HA connection details live in a gitignored secrets.properties (see
-// secrets.properties.example) so a real token/host never lands in source
-// control. Falls back to placeholders so a fresh clone still compiles.
+// Optional local settings live in a gitignored secrets.properties (see
+// secrets.properties.example): the release signing keystore, and — only as a
+// legacy fallback — HA credentials, which the app normally gets at runtime from
+// its setup server. Falls back to blanks so a fresh clone still compiles.
 val secrets = Properties().apply {
     val f = rootProject.file("secrets.properties")
     if (f.exists()) f.inputStream().use { load(it) }

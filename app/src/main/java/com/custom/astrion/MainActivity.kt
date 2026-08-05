@@ -40,9 +40,10 @@ import com.custom.astrion.ui.Dashboard
  * Single-activity host. Owns the HA client, wires physical buttons to the
  * config's hotkeys, and renders the swipeable dashboard.
  *
- * IMPORTANT — configure your connection in `secrets.properties` (see
- * secrets.properties.example) before building — HA_URL / HA_TOKEN are
- * injected as BuildConfig fields so a real token never lands in source.
+ * Connection details are NOT compiled in: they're resolved at runtime by
+ * ConnectionConfig from app-private storage, populated by the ConfigServer setup
+ * form on :8099. The BuildConfig fields remain only as a blank fallback, so
+ * secrets.properties is needed for release SIGNING, not for credentials.
  */
 class MainActivity : ComponentActivity() {
 

@@ -74,6 +74,12 @@ A thermostat pill: name, `setpoint · now current`, and − / + buttons calling
 `climate.set_temperature`. The setpoint is tinted by `hvac_action`, so a glance
 tells you whether the system is actually cooling/heating rather than just set to.
 
+**Deliberately minimal** — no mode picker, fan speed, humidity or schedule. A
+remote in your hand is for "it's a degree too warm"; each extra control costs
+vertical space on a 480×800 screen and a press to hunt for. Anything beyond
+nudging the setpoint belongs on a wall dashboard, or use the stock `climate` card
+for the full set.
+
 ```json
 { "type": "bubble_climate", "options": {
     "entity_id": "climate.living_room", "name": "Common Areas AC", "step": 1 } }

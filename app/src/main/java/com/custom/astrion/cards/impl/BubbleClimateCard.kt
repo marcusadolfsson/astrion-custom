@@ -29,13 +29,19 @@ import com.custom.astrion.ha.ServiceCall
 import kotlin.math.roundToInt
 
 /**
- * Bubble-Card-style thermostat pill, matching the wall dashboard's climate card
- * but sized for the remote: icon + name + setpoint/current on the LEFT, − / +
- * on the RIGHT. Tapping the icon cycles nothing (deliberately) — this is a
- * setpoint nudger, mode changes stay on the wall dashboards.
+ * Bubble-Card-style thermostat pill: name + setpoint/current on the LEFT,
+ * − / + on the RIGHT.
  *
- * The icon tints by what the system is actually doing (hvac_action), so a glance
- * shows cooling vs idle.
+ * DELIBERATELY MINIMAL. This is a *setpoint nudger*, not a thermostat UI — there
+ * is no mode picker, no fan speed, no humidity, no schedule. A remote in your
+ * hand is for "it's a degree too warm", and every extra control costs vertical
+ * space on a 480x800 screen and a press you don't want to hunt for. Anything
+ * beyond nudging the setpoint belongs on a wall dashboard or the thermostat
+ * itself; use the stock `climate` card if you want the full set.
+ *
+ * The one concession: the setpoint is tinted by hvac_action, so a glance
+ * distinguishes "set to 70" from "actually cooling right now" without adding a
+ * row.
  *
  * Config:
  *   { "type": "bubble_climate", "options": {

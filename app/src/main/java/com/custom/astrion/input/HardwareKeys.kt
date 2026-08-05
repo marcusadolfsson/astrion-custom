@@ -18,14 +18,16 @@ enum class HardwareKey {
     VOLUME_UP, VOLUME_DOWN, MUTE,
     PAGE_UP, PAGE_DOWN,
     UP, DOWN, LEFT, RIGHT, CENTER,
-    VOICE,
+    VOICE, MENU,
     LIGHT, CURTAIN, SCENE, AC,
     CUSTOM_1, CUSTOM_2, CUSTOM_3, CUSTOM_4,
     UNKNOWN;
 
     companion object {
-        // Android keycode -> logical button, straight from device_key_code.json (HA100).
-        // Note: 82 and 91 both map to "mute" in the stock config; kept as MUTE here.
+        // Android keycode -> logical button, from device_key_code.json (HA100),
+        // corrected against the real hardware: the physical MUTE button emits
+        // 164 (KEYCODE_VOLUME_MUTE), not 82/91. 82 is KEYCODE_MENU (the button
+        // opposite mute) — mapped to MENU so it stops acting as mute.
         private val MAP: Map<Int, HardwareKey> = mapOf(
             4 to BACK,
             131 to HOME,
@@ -39,8 +41,9 @@ enum class HardwareKey {
             21 to LEFT,
             22 to RIGHT,
             23 to CENTER,
+            164 to MUTE,
             91 to MUTE,
-            82 to MUTE,
+            82 to MENU,
             133 to VOICE,
             134 to LIGHT,
             135 to CURTAIN,

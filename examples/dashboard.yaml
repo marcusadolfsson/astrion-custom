@@ -306,6 +306,10 @@ hotkeys:
   service: script.lr_av_play_switch
 - key: CUSTOM_4
   service: script.lr_av_off
+# The physical Off button reports keycode 132 (POWER). Without a binding the app
+# just toasts "Unmapped key: 132".
+- key: POWER
+  service: script.lr_av_off
 - key: VOICE
   action: sync
 longHotkeys:

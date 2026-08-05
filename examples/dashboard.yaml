@@ -31,15 +31,11 @@ pages:
     options:
       entity_id: input_select.lr_av_activity
       state: Watch Apple TV
-      cards:
-      - type: media_player
+      card:
+        type: media_player
         options:
           entity_id: media_player.living_room_apple_tv
           variant: full
-      - type: source_select
-        options:
-          entity_id: media_player.living_room_apple_tv
-          name: Apple TV apps
   - type: conditional
     options:
       entity_id: input_select.lr_av_activity

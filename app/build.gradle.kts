@@ -33,9 +33,31 @@ android {
         buildConfigField("String", "HA_TOKEN", "\"${secret("haToken", "YOUR_LONG_LIVED_ACCESS_TOKEN")}\"")
     }
 
+    // Release signing. The keystore lives OUTSIDE the repo at a path given by
+    // secrets.properties (releaseKeystore/...); it must be the SAME key for
+    // every build or Android refuses to update the installed app in place.
+    signingConfigs {
+        create("release") {
+            val ks = secret("releaseKeystore", "")
+            if (ks.isNotEmpty() && file(ks).exists()) {
+                storeFile = file(ks)
+                storePassword = secret("releaseKeystorePassword", "")
+                keyAlias = secret("releaseKeyAlias", "astrion")
+                keyPassword = secret("releaseKeyPassword", "")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: strip unused code/resources and optimise. The app ships to a
+            // 1 GB MT6580 on Android 8.1, where UI-thread CPU work is the main
+            // source of scroll jank — and debug builds add real per-frame cost
+            // (debuggable ART, Compose live literals + source information).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

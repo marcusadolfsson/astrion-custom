@@ -3,6 +3,7 @@ package com.custom.astrion
 import android.app.Application
 import com.custom.astrion.cards.CardRegistry
 import com.custom.astrion.cards.impl.BubbleLightCard
+import com.custom.astrion.cards.impl.BubbleSelectCard
 import com.custom.astrion.cards.impl.ButtonGridCard
 import com.custom.astrion.cards.impl.ClimateCard
 import com.custom.astrion.cards.impl.ClockWeatherCard
@@ -16,6 +17,7 @@ import com.custom.astrion.cards.impl.PictureElementsCard
 import com.custom.astrion.cards.impl.PlexCard
 import com.custom.astrion.cards.impl.RowCard
 import com.custom.astrion.cards.impl.SceneGridCard
+import com.custom.astrion.cards.impl.SeparatorCard
 import com.custom.astrion.cards.impl.SourceSelectCard
 import com.custom.astrion.cards.impl.SpeakerGroupCard
 import com.custom.astrion.cards.impl.SwitchCard
@@ -56,6 +58,8 @@ class AstrionApp : Application() {
             SourceSelectCard(),
             VacuumCard(),
             ConditionalCard(),
+            BubbleSelectCard(),
+            SeparatorCard(),
             // ← register your own card types here
         )
     }

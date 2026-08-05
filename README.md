@@ -7,6 +7,15 @@ It connects directly to Home Assistant over the standard WebSocket API, renders
 whatever cards and layouts you define, and maps the remote's physical buttons to
 any action you want.
 
+
+> **This is a fork.** It adds five card types (`separator`, `bubble_select`,
+> `shade_control`, `bubble_climate`, `conditional`), hotkeys that scroll to a
+> section rather than a page, runtime credentials with a setup web server (so the
+> APK carries no token), layout sync from Home Assistant, a signed R8 release
+> build, and a measured performance pass for the HA100's SoC.
+> **See [docs/FORK_ADDITIONS.md](docs/FORK_ADDITIONS.md).**
+> Upstream: [baes-cloud/astrion-dashboard](https://github.com/baes-cloud/astrion-dashboard).
+
 ---
 
 ## Why this instead of customising HaRemote?

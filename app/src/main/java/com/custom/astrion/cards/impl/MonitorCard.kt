@@ -62,8 +62,13 @@ class MonitorCard : CardRenderer {
                 val entityId = row["entity_id"] as? String ?: return@forEach
                 val e = ctx.entities[entityId]
                 val name = row["name"] as? String ?: e?.friendlyName ?: entityId
-                val unit = e?.attrString("unit_of_measurement").orEmpty()
-                val value = e?.state?.let { if (it == "unknown" || it == "unavailable") "—" else it } ?: "—"
+                // Optional `attribute`: read that attribute instead of the state,
+                // so attribute-packed sensors (e.g. sensor.vrroom_tx0_video_plain
+                // carrying resolution/bit_depth/chroma/...) can each get a row.
+                val attribute = row["attribute"] as? String
+                val raw = if (attribute != null) e?.attrString(attribute) else e?.state
+                val unit = if (attribute != null) "" else e?.attrString("unit_of_measurement").orEmpty()
+                val value = raw?.takeIf { it.isNotBlank() && it != "unknown" && it != "unavailable" } ?: "—"
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),

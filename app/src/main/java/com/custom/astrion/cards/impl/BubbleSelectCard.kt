@@ -7,11 +7,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Blinds
 import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.SettingsRemote
+import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.DropdownMenu
@@ -152,6 +154,8 @@ object CardIcons {
         "screen", "aspect", "layout", "display" -> Icons.Filled.AspectRatio
         "movie", "theater", "scene" -> Icons.Filled.Movie
         "light", "bulb", "lights" -> Icons.Filled.Lightbulb
+        "curtain", "shade", "shades", "blinds" -> Icons.Filled.Blinds
+        "thermostat", "climate", "ac", "temp" -> Icons.Filled.Thermostat
         "remote" -> Icons.Filled.SettingsRemote
         else -> Icons.Filled.Tune
     }

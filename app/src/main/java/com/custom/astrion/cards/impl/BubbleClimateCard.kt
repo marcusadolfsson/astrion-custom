@@ -79,11 +79,9 @@ class BubbleClimateCard : CardRenderer {
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier.size(44.dp).clip(CircleShape).background(accent),
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Thermostat, contentDescription = null, tint = Color.White) }
-            Spacer(Modifier.width(10.dp))
+            // No icon circle — with three controls on a 320dp row it crowded the
+            // text. The hvac_action cue moves to the setpoint colour instead.
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     name,
@@ -98,7 +96,9 @@ class BubbleClimateCard : CardRenderer {
                         append(target?.let { "${fmt(it)}°" } ?: "—")
                         current?.let { append("  ·  now ${fmt(it)}°") }
                     },
-                    color = Color(0xFFF1F4FA),
+                    // Tinted by hvac_action so "is it actually cooling?" is still
+                    // visible now that the coloured icon is gone.
+                    color = if (action == "cooling" || action == "heating") accent else Color(0xFFF1F4FA),
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,

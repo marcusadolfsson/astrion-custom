@@ -115,25 +115,35 @@ class FanCard : CardRenderer {
             )
         }
 
+        // Shaped to match the other control pills (shade_control / bubble_climate):
+        // same height, corner radius, label-over-value typography and buttons.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
+                .height(72.dp)
+                .clip(RoundedCornerShape(30.dp))
                 .background(if (on) Color(0xFF2B3A67) else Color(0xFF1E3841))
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Spacer(Modifier.width(14.dp))
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .clickable { ctx.client.toggle(entityId) }
             ) {
-                Text(name, color = Color(0xFFE6F0F1), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                Text(if (on) "$pct%" else "Off", color = Color(0xFF93AFB6), fontSize = 13.sp)
+                Text(name, color = Color(0xFF93AFB6), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    if (on) "$pct%" else "Off",
+                    color = Color(0xFFF1F4FA),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CircleBtn(Icons.Filled.KeyboardArrowDown) { setPct(pct - step) }
+            Spacer(Modifier.width(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 CircleBtn(Icons.Filled.KeyboardArrowUp) { setPct(pct + step) }
+                CircleBtn(Icons.Filled.KeyboardArrowDown) { setPct(pct - step) }
             }
         }
     }
@@ -208,12 +218,12 @@ private fun CircleBtn(
 ) {
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(46.dp)
             .clip(CircleShape)
-            .background(Color(0xFF2C4C58))
+            .background(Color(0xFF2E7D95))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = Color(0xFFCBDCE0))
+        Icon(icon, contentDescription = null, tint = Color.White)
     }
 }

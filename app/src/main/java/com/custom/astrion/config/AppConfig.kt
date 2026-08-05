@@ -30,8 +30,12 @@ data class PageConfig(
  * BACK HOME POWER VOICE, LIGHT CURTAIN SCENE AC, CUSTOM_1..CUSTOM_4.
  *
  * Exactly one action per binding:
- *  - `page`: navigate to the page with that name (case-insensitive), or
+ *  - `page`: navigate to the page with that name (case-insensitive),
+ *  - `scrollTo` (JSON `scroll_to`): scroll the target page to the `separator`
+ *    card whose name matches (combine with `page` to jump pages then scroll), or
  *  - `service` ("domain.service") + optional `entityId` + flat `data` map.
+ *
+ * More than one may be set (e.g. page + scrollTo, or scrollTo + service).
  */
 data class HotkeyConfig(
     val key: String,
@@ -39,4 +43,5 @@ data class HotkeyConfig(
     val service: String? = null,
     val entityId: String? = null,
     val data: Map<String, Any?> = emptyMap(),
+    val scrollTo: String? = null,
 )

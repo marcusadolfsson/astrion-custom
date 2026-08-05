@@ -91,6 +91,9 @@ class MainActivity : ComponentActivity() {
     /** Page index requested by a hardware button; consumed by the Dashboard. */
     private var navTarget by mutableStateOf<Int?>(null)
 
+    /** Section (separator name) to scroll to; consumed by the Dashboard. */
+    private var scrollTarget by mutableStateOf<String?>(null)
+
     private val storagePermission = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { reloadDashboard() }
@@ -135,6 +138,8 @@ class MainActivity : ComponentActivity() {
                 configNotice = dashboard.notice,
                 navTarget = navTarget,
                 onNavHandled = { navTarget = null },
+                scrollTarget = scrollTarget,
+                onScrollHandled = { scrollTarget = null },
             )
         }
     }
@@ -170,20 +175,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Execute one hotkey: page navigation, or a HA service call. */
+    /**
+     * Execute one hotkey. A binding may combine actions — e.g. `page` +
+     * `scroll_to` jumps to a page then scrolls to a section, and any of them may
+     * be paired with a `service` call.
+     */
     private fun runHotkey(hk: HotkeyConfig): Boolean {
+        var handled = false
         hk.page?.let { pageName ->
             val idx = dashboard.config.pages.indexOfFirst { it.name.equals(pageName, ignoreCase = true) }
-            if (idx < 0) return false
-            navTarget = idx
-            return true
+            if (idx >= 0) {
+                navTarget = idx
+                handled = true
+            }
         }
-        val service = hk.service ?: return false
-        val domain = service.substringBefore('.')
-        val svc = service.substringAfter('.')
-        val data = hk.data.mapValues { JsonPlain.toJson(it.value) }
-        client.callService(ServiceCall(domain, svc, hk.entityId, data))
-        return true
+        hk.scrollTo?.let {
+            scrollTarget = it
+            handled = true
+        }
+        hk.service?.let { service ->
+            val domain = service.substringBefore('.')
+            val svc = service.substringAfter('.')
+            val data = hk.data.mapValues { JsonPlain.toJson(it.value) }
+            client.callService(ServiceCall(domain, svc, hk.entityId, data))
+            handled = true
+        }
+        return handled
     }
 
     /**

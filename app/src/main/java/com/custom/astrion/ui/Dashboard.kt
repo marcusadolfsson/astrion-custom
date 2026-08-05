@@ -3,11 +3,12 @@ package com.custom.astrion.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +51,9 @@ fun Dashboard(
     /** Page index requested by a hardware button; consumed via onNavHandled. */
     navTarget: Int? = null,
     onNavHandled: () -> Unit = {},
+    /** Section (separator name) to scroll the current page to; consumed via onScrollHandled. */
+    scrollTarget: String? = null,
+    onScrollHandled: () -> Unit = {},
 ) {
     val entities by entitiesState
     val connection by connectionState
@@ -83,7 +87,14 @@ fun Dashboard(
                 .weight(1f)
                 .fillMaxWidth(),
         ) { pageIndex ->
-            PageContent(config.pages[pageIndex], ctx)
+            // Only the settled/current page acts on a scroll request; other
+            // (pre-composed) pages get null so they don't consume it early.
+            PageContent(
+                config.pages[pageIndex],
+                ctx,
+                if (pageIndex == pagerState.currentPage) scrollTarget else null,
+                onScrollHandled,
+            )
         }
 
         PageIndicator(
@@ -95,22 +106,40 @@ fun Dashboard(
 }
 
 @Composable
-private fun PageContent(page: PageConfig, ctx: CardContext) {
+private fun PageContent(
+    page: PageConfig,
+    ctx: CardContext,
+    scrollTarget: String? = null,
+    onScrollHandled: () -> Unit = {},
+) {
     // Cards with options["pin"] == "bottom" float at the bottom, always visible;
     // the rest scroll above them.
     val pinned = page.cards.filter { it.options["pin"] == "bottom" }
     val scrolling = page.cards.filter { it.options["pin"] != "bottom" }
 
+    val listState = rememberLazyListState()
+    // Hardware "scroll to section": scroll so the matching separator sits at the
+    // top. Only the page that actually has the section consumes the request.
+    LaunchedEffect(scrollTarget) {
+        val name = scrollTarget ?: return@LaunchedEffect
+        val idx = scrolling.indexOfFirst {
+            it.type == "separator" &&
+                (it.options["name"] as? String)?.equals(name, ignoreCase = true) == true
+        }
+        if (idx >= 0) {
+            listState.animateScrollToItem(idx)
+            onScrollHandled()
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            scrolling.forEach { RenderCard(it, ctx) }
+            items(scrolling) { RenderCard(it, ctx) }
         }
         if (pinned.isNotEmpty()) {
             Column(

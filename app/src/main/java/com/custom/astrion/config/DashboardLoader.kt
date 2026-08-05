@@ -110,7 +110,8 @@ object DashboardLoader {
         val data = (obj["data"] as? JsonObject)
             ?.entries?.associate { (k, v) -> k to JsonPlain.toPlain(v) }
             ?: emptyMap()
-        return HotkeyConfig(key, page, service, entityId, data)
+        val scrollTo = (obj["scroll_to"] as? JsonPrimitive)?.content
+        return HotkeyConfig(key, page, service, entityId, data, scrollTo)
     }
 
     // ---- serialize defaults -------------------------------------------------
@@ -154,6 +155,7 @@ object DashboardLoader {
                 hk.service?.let { put("service", it) }
                 hk.entityId?.let { put("entityId", it) }
                 if (hk.data.isNotEmpty()) put("data", JsonPlain.toJson(hk.data))
+                hk.scrollTo?.let { put("scroll_to", it) }
             })
         }
     }

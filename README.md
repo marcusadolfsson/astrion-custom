@@ -83,6 +83,11 @@ adb connect <remote-ip>:5555
 
 ### 3. Install the app
 
+Either works; the difference only matters later. The prebuilt APK renders every
+card type this fork ships, and layouts are data, so you can go a long way without
+a toolchain — but **adding a brand-new card type means compiling** (see
+[Add a new native card type](#add-a-new-native-card-type-the-whole-point)).
+
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
@@ -231,6 +236,17 @@ press Sync.
 ---
 
 ## Add a new native card type (the whole point)
+
+> **This is the one thing that needs you to build the app yourself.** A card
+> *type* is Kotlin, so it has to be compiled in — the prebuilt APK in
+> `releases/` can only render the types it already knows about. Follow
+> [build from source](#3-install-the-app) (Option B), then reinstall with
+> `adb install -r`.
+>
+> Everything else is data, not code: adding or rearranging card *instances*,
+> pages, sections and hotkeys is a layout edit plus **Sync** — no rebuild, no
+> adb. Design cards to read plenty of `options` up front and most future tweaks
+> stay on the YAML side.
 
 1. Create a renderer in `app/src/main/java/com/custom/astrion/cards/impl/`:
 

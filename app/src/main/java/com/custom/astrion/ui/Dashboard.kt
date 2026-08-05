@@ -393,15 +393,8 @@ private fun PageIndicator(
             .padding(top = 4.dp, bottom = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Grab-handle hint.
-        Box(
-            modifier = Modifier
-                .width(40.dp)
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color(0xFF33525E)),
-        )
-        Spacer(Modifier.height(5.dp))
+        // No grab-handle affordance: the swipe-up gesture still works anywhere
+        // along this bar, it just isn't advertised.
         Row(verticalAlignment = Alignment.CenterVertically) {
             pages.forEachIndexed { i, _ ->
                 val active = i == current

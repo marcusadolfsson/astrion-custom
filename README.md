@@ -1,114 +1,270 @@
 # Astrion Custom — a standalone Home Assistant UI for the Sanytron Astrion HA100
 
-A from-scratch Android app that **replaces** the stock `HaRemote` app on the
-Astrion remote with a fully custom, extensible UI you control end to end.
+A from-scratch Android app that **replaces** the stock `HaRemote` UI on the
+Astrion HA100 remote with a fully custom, extensible interface you control end
+to end.
 
 It connects directly to Home Assistant over the standard WebSocket API, renders
 whatever cards and layouts you define, and maps the remote's physical buttons to
-any action you want.
+any action you want. Nothing depends on Sanytron's cloud or their HA integration
+— only a reachable HA instance and a long-lived token.
 
-
-> **This is a fork.** It adds five card types (`separator`, `bubble_select`,
-> `shade_control`, `bubble_climate`, `conditional`), hotkeys that scroll to a
-> section rather than a page, runtime credentials with a setup web server (so the
-> APK carries no token), layout sync from Home Assistant, a transient volume/mute
-> overlay, a signed R8 release build, and a measured performance pass for the
-> HA100's SoC.
-> **See [docs/FORK_ADDITIONS.md](docs/FORK_ADDITIONS.md).**
-> Upstream: [baes-cloud/astrion-dashboard](https://github.com/baes-cloud/astrion-dashboard).
+> **This is a fork** of [baes-cloud/astrion-dashboard](https://github.com/baes-cloud/astrion-dashboard).
+> Jump to **[what this fork changes](#what-this-fork-changes)**.
 
 ---
 
-## Why this instead of customising HaRemote?
+## Screenshots
 
-The stock app pulls your HA Lovelace dashboard, then keeps **only** cards whose
-`type` is one of 11 hardcoded `custom:aiks-*` strings, redrawing them in a fixed
-native style you can't change via CSS or HA. There is no plugin path — the card
-registry is a static list compiled into the APK.
-
-This app inverts that: **you** own the card taxonomy. Adding a brand-new native
-card type is three small steps (below), and each card is plain Jetpack Compose,
-so layout / colour / sizing / animation are entirely yours.
-
-Nothing here depends on Sanytron's cloud or their custom HA integration — only a
-reachable HA instance and a long-lived token.
-
----
-
-## Build & install
-
-Requirements: Android Studio (Ladybug or newer) with the Android SDK.
-
-1. Open the project folder in Android Studio and let it sync Gradle.
-2. Copy `secrets.properties.example` to `secrets.properties` (gitignored —
-   never committed) and fill in your own values:
-   ```properties
-   haUrl=http://<your-ha-ip>:8123
-   haToken=<long-lived access token>
-   ```
-   Create the token in HA: Profile → Security → Long-lived access tokens.
-   These are injected as `BuildConfig.HA_URL` / `BuildConfig.HA_TOKEN` at build
-   time, so a real token never lands in source control.
-3. Build the APK: **Build → Build App Bundle(s) / APK(s) → Build APK(s)**,
-   or from a terminal with the SDK on PATH: `./gradlew assembleDebug`.
-4. Install onto the remote over ADB (same way you pulled the stock APK):
-   ```
-   adb install app/build/outputs/apk/debug/app-debug.apk
-   ```
-5. Launch it. To make it the default home experience you can set it as launcher
-   or just open it manually; the stock HaRemote app can stay installed
-   alongside.
-
-### Screenshots
-
-| | | |
+| Main page | Activity selector | Now playing |
 |---|---|---|
-| ![Main](screenshots/home.png) | ![Lights](screenshots/light-control.png) | ![Light detail](screenshots/light-card.png) |
-| ![Climate](screenshots/climate-control.png) | ![Vacuum popup](screenshots/robovac-control.png) | ![Vacuum docked on floorplan](screenshots/robovac-docked.png) |
+| ![Main](examples/screenshots/01-main.png) | ![Activity](examples/screenshots/02-activity-selector.png) | ![Kaleidescape](examples/screenshots/03-kaleidescape.png) |
 
-`screenshots/LD2450-tracking.gif` and `screenshots/sonos-control.gif` show the
-mmWave presence dots moving live on the floorplan, and the Sonos group/volume
-controls in action.
+| Display section | Volume overlay | Mute overlay |
+|---|---|---|
+| ![Display](examples/screenshots/08-display-section.png) | ![Volume](examples/screenshots/06-volume-overlay.png) | ![Mute](examples/screenshots/07-mute-overlay.png) |
 
-> Target: the HA100 runs Android 8.1 (API 27); `minSdk` is 26. Keep custom cards
-> lightweight — the SoC (MT6580, 1 GB RAM) is modest.
+| Status page | …continued |
+|---|---|
+| ![Status](examples/screenshots/04-status.png) | ![Status lower](examples/screenshots/05-status-lower.png) |
+
+The layout behind these shots is [`examples/dashboard.yaml`](examples/dashboard.yaml)
+— a real, in-use configuration rather than a toy one.
+
+---
+
+## What this fork changes
+
+All additive: the upstream architecture (an open `CardRegistry`, a document-driven
+layout) is unchanged. Each item below landed as its own commit.
+
+| Area | Change |
+|---|---|
+| **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional` |
+| **Changed cards** | `media_player` transport rework + auto-collapse, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
+| **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
+| **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, swipe-up info panel |
+| **UI** | transient volume / mute overlay |
+| **Build** | signed, R8-minified release (16 MB → 1.3 MB), bounded Gradle heap |
+| **Performance** | filtered entity subscription, per-key entity observation, card-level pass |
+
+**→ [docs/FORK_ADDITIONS.md](docs/FORK_ADDITIONS.md)** documents every new card
+and config option with JSON examples, and reports the performance work with the
+on-device measurements behind it — including one pass that measurably *didn't*
+help.
+
+---
+
+## Install
+
+### 1. Get at the USB-C port
+
+The HA100's USB-C port hides under the plastic strip on the bottom edge.
+**Undo the two small screws** and lift the strip off:
+
+<img src="examples/screenshots/usb-c-port.jpeg" width="380" alt="USB-C port under the bottom strip">
+
+### 2. Enable developer options
+
+On the remote: **Settings → About → tap Build number 7×**, then
+**Settings → Developer options → USB debugging**. With a cable connected:
+
+```sh
+adb devices        # the remote should be listed
+```
+
+Optionally switch to wireless adb so the cable isn't needed again. Note this does
+**not** survive a reboot — redo it over USB if the remote restarts:
+
+```sh
+adb tcpip 5555
+adb connect <remote-ip>:5555
+```
+
+### 3. Install the app
+
+**Option A — prebuilt release** (signed, minified, ~1.4 MB):
+
+```sh
+adb install releases/astrion-custom-0.12.0.apk
+```
+
+**Option B — build from source.** You need:
+
+| | |
+|---|---|
+| JDK | **17** — `JAVA_HOME` must point at it |
+| Android SDK | platform **34**, build-tools **34.0.0**, platform-tools |
+| Gradle | none, use the bundled wrapper (`./gradlew`) |
+| RAM | ~4 GB free; `gradle.properties` caps the heaps for smaller machines |
+
+```sh
+cp secrets.properties.example secrets.properties   # may stay blank — see step 5
+./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+For a **release** build (strongly preferred — debug builds are noticeably slower
+on this SoC), create a keystore and add it to `secrets.properties`:
+
+```sh
+keytool -genkeypair -keystore release.jks -alias astrion \
+  -keyalg RSA -keysize 2048 -validity 10950
+```
+
+```properties
+releaseKeystore=/path/to/release.jks
+releaseKeystorePassword=…
+releaseKeyAlias=astrion
+releaseKeyPassword=…
+```
+
+```sh
+./gradlew assembleRelease
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+> **Keep that key forever.** Android only allows in-place updates when the
+> signature matches; a different key means uninstalling first.
+
+### 4. Launch it with Key Mapper
+
+The stock `HaRemote` app is a **system app and the device's launcher** — don't
+try to replace it, the firmware will relaunch it. Instead bind a hardware key to
+open this app.
+
+Install [Key Mapper](https://github.com/keymapperorg/KeyMapper) (FOSS build):
+
+```sh
+adb install keymapper.apk
+```
+
+Enable its accessibility service, then create one key map:
+
+* **Trigger** — the Home key (it reports as **`F1`** on this hardware)
+* **Action** — Open app → *Astrion Custom*
+* **Constraint** — *HaRemote is in foreground*
+
+<img src="examples/screenshots/09-keymapper-rule.png" width="380" alt="Key Mapper rule">
+
+The constraint matters: without it the Home key is swallowed everywhere,
+including inside this app, where it's bound to your own hotkey.
+
+### 5. Turn the stock dashboard into a doorway
+
+Since the stock app is only a gate now, strip its Home Assistant dashboard down
+to a single card telling you what to press:
+
+<img src="examples/screenshots/10-stock-landing.png" width="380" alt="Stock landing card">
+
+> The stock app renders **only** its own `custom:aiks-*` card types — a plain
+> `markdown` card makes it show *"View is empty"*. Use an `aiks-scene-card`
+> pointed at a no-op script (a script with an empty `sequence`).
+
+### 6. Point the app at Home Assistant
+
+On first launch the app has no credentials and shows its own setup address:
+
+<img src="examples/screenshots/11-first-run-setup.png" width="380" alt="First-run setup screen">
+
+Open `http://<remote-ip>:8099` in any browser on the LAN and paste your Home
+Assistant URL and a **long-lived access token** (HA → profile → Security).
+
+Credentials are stored in the app's private storage — **not** in the APK, and not
+on `/sdcard` where any app with storage permission could read them. The setup
+server stops as soon as they're saved; reopen it later from the swipe-up info
+panel.
+
+### 7. Add your layout
+
+The app fetches a JSON layout from Home Assistant. The quickest route is HA's
+`www/` folder, which is served at `/local/`:
+
+```sh
+# convert examples/dashboard.yaml to JSON, then:
+cp dashboard.json /config/www/astrion/dashboard.json
+```
+
+…and set `DashboardLoader.REMOTE_PATH = "/local/astrion/dashboard.json"`.
+
+**Better:** install the companion component below and keep the layout in YAML.
+
+Sync to the remote any time from the **swipe-up panel → Sync**, or a hotkey with
+`"action": "sync"`. The layout is cached on the device, so the remote still works
+if HA is unreachable.
+
+---
+
+## The Home Assistant portion (optional but recommended)
+
+[`homeassistant/custom_components/astrion_dashboard/`](homeassistant/custom_components/astrion_dashboard)
+lets you author the layout in **YAML** — comments, HA-native, `!include`-able —
+and serves it to the remote as JSON. No generated file to fall out of sync, and
+unlike `/local/` the endpoint requires authentication.
+
+1. Copy the component into your HA config:
+
+   ```sh
+   cp -r homeassistant/custom_components/astrion_dashboard /config/custom_components/
+   ```
+
+2. Put your layout at `/config/astrion/dashboard.yaml` — start from
+   [`examples/dashboard.yaml`](examples/dashboard.yaml).
+
+3. Add to `configuration.yaml`, then restart HA:
+
+   ```yaml
+   astrion_dashboard:
+     # path: astrion/dashboard.yaml   # optional, this is the default
+   ```
+
+4. Verify:
+
+   ```sh
+   curl -H "Authorization: Bearer <token>" http://<ha>:8123/api/astrion_dashboard
+   ```
+
+This fork already ships `REMOTE_PATH = "/api/astrion_dashboard"`, so nothing else
+is needed. Editing the layout then requires no adb and no rebuild: edit the YAML,
+press Sync.
 
 ---
 
 ## Add a new native card type (the whole point)
 
 1. Create a renderer in `app/src/main/java/com/custom/astrion/cards/impl/`:
+
    ```kotlin
    class ThermostatCard : CardRenderer {
        override val type = "thermostat"
+
        @Composable
        override fun Render(config: CardConfig, ctx: CardContext) {
-           // any Compose UI you like; read live state from ctx.entities,
-           // fire actions with ctx.client.callService(...)
+           val entityId = config.string("entity_id") ?: return
+           val e = ctx.entities[entityId]     // per-key read
+           Text(e?.state ?: "—")
        }
    }
    ```
-2. Register it in `AstrionApp.onCreate()`:
-   ```kotlin
-   CardRegistry.register(ThermostatCard())
-   ```
-3. Use it in `config/DashboardConfig.kt`:
-   ```kotlin
-   CardConfig("thermostat", mapOf("entity_id" to "climate.lounge"))
-   ```
 
-Order in `DashboardConfig.cards` is order on screen. An unregistered type shows
-an inline warning rather than vanishing silently.
+2. Register it in `AstrionApp.onCreate()`: `CardRegistry.register(ThermostatCard())`
+3. Reference its `type` from your layout.
+
+An unregistered type shows an inline warning rather than vanishing silently.
+
+> Read `ctx.entities` **by key**. Iterating it (`values` / `keys` / `forEach`)
+> inside composition subscribes to every entity and undoes this fork's
+> recomposition work — see
+> [docs/FORK_ADDITIONS.md](docs/FORK_ADDITIONS.md#per-key-entity-observation).
 
 ---
 
 ## Physical buttons
 
-The HA100 button keycodes (extracted from the stock app's
-`device_key_code.json`) are wired up in `input/HardwareKeys.kt`. Bind them in
-`MainActivity.bindHardwareButtons()` — e.g. the dedicated LIGHT / SCENE / AC /
-CURTAIN and CUSTOM_1..4 keys can each fire any service call. Presses arrive as
-standard Android `KeyEvent`s, intercepted in `dispatchKeyEvent`.
+The HA100 keycodes live in `input/HardwareKeys.kt`; bindings come from the
+layout's `hotkeys` list, so most changes need no rebuild. The dedicated
+LIGHT / CURTAIN / SCENE / AC and CUSTOM_1..4 keys can each fire a service, jump
+to a page, scroll to a section, or run a built-in action.
 
 ---
 
@@ -116,30 +272,26 @@ standard Android `KeyEvent`s, intercepted in `dispatchKeyEvent`.
 
 | Path | Role |
 |------|------|
-| `ha/HaClient.kt` | Standard HA WebSocket client (auth, get_states, subscribe, call_service, ping) |
-| `ha/HaModels.kt` | Entity state + connection models |
-| `cards/Card.kt` | `CardRenderer` interface + `CardRegistry` (extensibility core) |
-| `cards/impl/*` | 18 card types — see the table in `COMMUNITY.md` for what each one does |
-| `config/DashboardConfig.kt` | Your dashboard layout (compiled-in fallback; live layout is a JSON file, see below) |
-| `config/DashboardLoader.kt` | Reads/writes `/sdcard/astrion/dashboard.json`, falls back to the compiled default |
-| `ui/Dashboard.kt` | Renders the card list, page pager, hotkey dispatch |
-| `input/HardwareKeys.kt` | HA100 keycode map + router (tap vs. long-press) |
-| `MainActivity.kt` | Compose host + hardware key dispatch + motion-wake |
-| `AstrionApp.kt` | Registers card types at startup |
+| `ha/HaClient.kt` | HA WebSocket client (auth, filtered `subscribe_entities`, `call_service`, ping) |
+| `cards/Card.kt` | `CardRenderer` + `CardRegistry` + the `@Stable` `CardContext` |
+| `cards/impl/*` | Card types — upstream's plus this fork's five |
+| `config/DashboardLoader.kt` | Fetches the layout from HA, caches it, falls back to the compiled default |
+| `config/ConnectionConfig.kt` | Credentials in app-private storage |
+| `config/ConfigServer.kt` | The `:8099` setup web form |
+| `config/EntityRefs.kt` | Works out which entities the layout uses, for the filtered subscription |
+| `ui/Dashboard.kt` | Pager, cards, info panel, volume overlay |
+| `input/HardwareKeys.kt` | HA100 keycode map + tap/long-press router |
+| `homeassistant/custom_components/astrion_dashboard/` | Serves the YAML layout as JSON |
 
-See `COMMUNITY.md` for the full card reference, the JSON config schema, and
-the physical-button map. See `ARCHITECTURE.md` for how the stock app works
-internally and why this design follows from it.
+`COMMUNITY.md` has upstream's full card reference and config schema;
+`ARCHITECTURE.md` explains how the stock app works and why this design follows.
 
 ---
 
 ## Status / caveats
 
-- This is a working dashboard, actively running on two HA100 remotes day to
-  day (a from-scratch replacement, not a scaffold anymore).
-- Credentials come from `secrets.properties` (gitignored) via `BuildConfig` —
-  see Build & install above.
-- The local IR-blaster path (Sanytron's `astrion/control_command` custom events)
-  is **not** implemented here — all control goes through HA `remote.*` /
-  `media_player.*` services over the network, which covers the online case. See
-  ARCHITECTURE.md if you want to add offline IR later.
+* Built for the **Astrion HA100** — 480×800, Android 8.1 (API 27, `minSdk` 26),
+  1 GB RAM, MT6580 + Mali-400. Keep custom cards light.
+* The stock app stays installed as the launcher; this runs alongside it.
+* Upstream ships **no LICENSE file**, so no redistribution rights are granted
+  beyond what GitHub's ToS allows for forks.

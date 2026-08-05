@@ -1,0 +1,317 @@
+# EXAMPLE LAYOUT — the author's real, in-use configuration for an HA100.
+#
+# It references entities from that specific Home Assistant (an AV activity
+# selector, NovaStar LED wall, madVR Envy, Kaleidescape, Sonos, Bond shades,
+# ecobee). Treat it as a worked example of the card types and hotkey behaviours
+# rather than something to drop in unchanged - swap the entity ids for yours.
+#
+# Served to the remote by custom_components/astrion_dashboard as JSON; see the
+# README's "Home Assistant portion" section.
+#
+# Conventions worth knowing:
+#   startPage      index of the page shown at launch
+#   separator      a section header; its name is ALSO the anchor that a hotkey
+#                  scroll_to jumps to, so renaming one means updating hotkeys
+#   bubble_select  pill + dropdown; active_entity supplies the shown value, and
+#                  each option's active_value must match that entity's state
+#                  string EXACTLY (e.g. "Watch Apple TV", not "Apple TV")
+#   open_on        section name whose hotkey should also pop this dropdown open
+#                  (used where a section holds a single selector)
+#   conditional    shows its child card(s) only while the entity matches -
+#                  state, state_not or state_in
+#   monitor rows   optional "attribute" reads that attribute, not the state
+#   hotkeys        physical buttons: page and/or scroll_to and/or service, or
+#                  action: sync. Key names come from HardwareKeys.kt.
+#
+startPage: 0
+pages:
+- name: Main
+  cards:
+  - type: conditional
+    options:
+      entity_id: input_select.lr_av_activity
+      state: Watch Apple TV
+      cards:
+      - type: media_player
+        options:
+          entity_id: media_player.living_room_apple_tv
+          variant: full
+      - type: source_select
+        options:
+          entity_id: media_player.living_room_apple_tv
+          name: Apple TV apps
+  - type: conditional
+    options:
+      entity_id: input_select.lr_av_activity
+      state: Watch Kaleidescape
+      card:
+        type: media_player
+        options:
+          entity_id: media_player.kaleidescape_strato_e
+          variant: full
+          reverse:
+            service: remote.send_command
+            entity_id: remote.kaleidescape_strato_e
+            data:
+              command: scan_reverse
+          forward:
+            service: remote.send_command
+            entity_id: remote.kaleidescape_strato_e
+            data:
+              command: scan_forward
+  - type: separator
+    options:
+      name: Watch
+      icon: tv
+  - type: bubble_select
+    options:
+      name: Activity
+      icon: tv
+      open_on: Watch
+      active_entity: input_select.lr_av_activity
+      options:
+      - name: Apple TV
+        service: script.lr_av_watch_apple_tv
+        active_value: Watch Apple TV
+      - name: Kaleidescape
+        service: script.lr_av_watch_kaleidescape
+        active_value: Watch Kaleidescape
+      - name: Nintendo
+        service: script.lr_av_play_switch
+        active_value: Play Switch
+      - name: 'Off'
+        service: script.lr_av_off
+        active_value: 'Off'
+  - type: conditional
+    options:
+      entity_id: input_select.lr_av_activity
+      state_not: 'Off'
+      cards:
+      - type: separator
+        options:
+          name: Display
+          icon: screen
+      - type: bubble_select
+        options:
+          name: Brightness
+          icon: brightness
+          active_entity: input_select.novastar_brightness_preset
+          options:
+          - name: Auto
+            service: script.novastar_brightness_auto
+            active_value: Auto
+          - name: Dim
+            service: script.novastar_brightness_dim
+            active_value: Dim
+          - name: Normal
+            service: script.novastar_brightness_normal
+            active_value: Normal
+          - name: Bright
+            service: script.novastar_brightness_bright
+            active_value: Bright
+      - type: bubble_select
+        options:
+          name: Screen Size
+          icon: aspect
+          active_entity: input_select.lr_screen_layout
+          options:
+          - name: Full
+            service: script.lr_screen_full
+            active_value: Full
+          - name: Compact
+            service: script.lr_screen_compact
+            active_value: Compact
+  - type: separator
+    options:
+      name: Lights
+      icon: light
+  - type: bubble_select
+    options:
+      name: Light Scenes
+      icon: scene
+      open_on: Lights
+      active_entity: input_select.living_room_active_scene
+      options:
+      - name: Bright
+        service: script.lr_lights_bright
+        active_value: Bright
+      - name: Entertain
+        service: script.lr_lights_entertain
+        active_value: Entertain
+      - name: Relax
+        service: script.lr_lights_relax
+        active_value: Relax
+      - name: Movie
+        service: script.lr_lights_movie
+        active_value: Movie
+      - name: 'Off'
+        service: script.lr_lights_off
+        active_value: 'Off'
+  - type: separator
+    options:
+      name: Shades
+      icon: curtain
+  - type: shade_control
+    options:
+      name: Shades
+      target_entity: input_select.lr_shade_target
+      open:
+        service: script.lr_shade_target_open
+      stop:
+        service: script.lr_shade_target_stop
+      close:
+        service: script.lr_shade_target_close
+  - type: separator
+    options:
+      name: Climate
+      icon: thermostat
+  - type: bubble_climate
+    options:
+      entity_id: climate.living_room
+      name: Common Areas AC
+      step: 1
+  - type: fan
+    options:
+      entity_id: fan.living_room_ceiling_fan
+      name: Ceiling Fan
+      step: 34
+- name: Status
+  cards:
+  - type: separator
+    options:
+      name: Source
+      icon: tv
+  - type: monitor
+    options:
+      entities:
+      - entity_id: sensor.vrroom_tx0_source
+        name: Source
+      - entity_id: sensor.vrroom_tx0_video_plain
+        attribute: resolution
+        name: Resolution
+      - entity_id: sensor.vrroom_tx0_video_plain
+        attribute: dynamic_range
+        name: Dynamic Range
+      - entity_id: sensor.vrroom_tx0_video_plain
+        attribute: color_space
+        name: Color Space
+      - entity_id: sensor.vrroom_tx0_video_plain
+        attribute: bit_depth
+        name: Bit Depth
+      - entity_id: sensor.vrroom_tx0_video_plain
+        attribute: chroma
+        name: Chroma
+      - entity_id: sensor.vrroom_tx0_video_plain
+        attribute: hdcp
+        name: HDCP
+      - entity_id: sensor.vrroom_earc_audio_out
+        name: Audio (VRROOM)
+      - entity_id: sensor.living_room_audio_input_format
+        name: Audio (Sonos)
+  - type: separator
+    options:
+      name: Envy In
+      icon: remote
+  - type: monitor
+    options:
+      entities:
+      - entity_id: sensor.madvr_envy_10_10_10_167_incoming_signal_resolution
+        name: Resolution
+      - entity_id: sensor.madvr_envy_10_10_10_167_incoming_signal_frame_rate
+        name: Frame Rate
+      - entity_id: sensor.madvr_envy_10_10_10_167_incoming_signal_hdr_mode
+        name: HDR Mode
+      - entity_id: sensor.madvr_envy_10_10_10_167_incoming_signal_aspect_ratio
+        name: Signal Aspect
+      - entity_id: sensor.madvr_envy_10_10_10_167_aspect_ratio_name
+        name: Content AR
+  - type: separator
+    options:
+      name: Envy Out
+      icon: remote
+  - type: monitor
+    options:
+      entities:
+      - entity_id: sensor.madvr_envy_10_10_10_167_outgoing_signal_resolution
+        name: Resolution
+      - entity_id: sensor.madvr_envy_10_10_10_167_outgoing_signal_frame_rate
+        name: Frame Rate
+      - entity_id: sensor.madvr_envy_10_10_10_167_outgoing_signal_hdr_mode
+        name: HDR Mode
+  - type: separator
+    options:
+      name: Screen
+      icon: screen
+  - type: monitor
+    options:
+      entities:
+      - entity_id: sensor.novastar_output
+        attribute: frame_rate
+        name: Frame Rate
+      - entity_id: sensor.novastar_output
+        attribute: bit_depth
+        name: Bit Depth
+      - entity_id: input_select.novastar_brightness_preset
+        name: Mode
+      - entity_id: sensor.novastar_auto_hdr_nits_target
+        name: Auto target
+      - entity_id: sensor.fp2_lr_lux_smoothed
+        name: Ambient lux
+overlay:
+  # Transient volume/mute OSD on the remote. volume_entity is the CACHE the
+  # volume scripts step instantly on the button press (the same one that drives
+  # the Envy OSD) - the Sonos's own volume_level lags too much to feel right.
+  volume_entity: input_number.lr_sonos_volume_cache
+  mute_entity: media_player.living_room
+hotkeys:
+- key: UP
+  service: script.lr_av_nav_up
+- key: DOWN
+  service: script.lr_av_nav_down
+- key: LEFT
+  service: script.lr_av_nav_left
+- key: RIGHT
+  service: script.lr_av_nav_right
+- key: CENTER
+  service: script.lr_av_nav_select
+- key: BACK
+  service: script.lr_av_nav_back
+- key: HOME
+  service: script.lr_av_nav_home
+- key: VOLUME_UP
+  service: script.lr_sonos_volume_up
+- key: VOLUME_DOWN
+  service: script.lr_sonos_volume_down
+- key: MUTE
+  service: script.lr_sonos_mute_toggle
+- key: PAGE_UP
+  service: script.lr_av_channel_up
+- key: PAGE_DOWN
+  service: script.lr_av_channel_down
+- key: LIGHT
+  page: Main
+  scroll_to: Lights
+- key: CURTAIN
+  page: Main
+  scroll_to: Shades
+- key: SCENE
+  page: Main
+  scroll_to: Watch
+- key: AC
+  page: Main
+  scroll_to: Climate
+- key: MENU
+  service: script.lr_av_menu
+- key: CUSTOM_1
+  service: script.lr_av_watch_apple_tv
+- key: CUSTOM_2
+  service: script.lr_av_watch_kaleidescape
+- key: CUSTOM_3
+  service: script.lr_av_play_switch
+- key: CUSTOM_4
+  service: script.lr_av_off
+- key: VOICE
+  action: sync
+longHotkeys:
+- key: CENTER
+  service: script.lr_av_play_pause

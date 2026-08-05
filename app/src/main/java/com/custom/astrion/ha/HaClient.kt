@@ -91,6 +91,11 @@ class HaClient(
     // ---- public API ---------------------------------------------------------
 
     fun connect() {
+        if (!baseUrl.startsWith("http")) {
+            Log.w(TAG, "connect() skipped: no HA URL configured")
+            _connection.value = ConnectionState.DISCONNECTED
+            return
+        }
         _connection.value = ConnectionState.CONNECTING
         val wsUrl = toWebSocketUrl(baseUrl)
         Log.i(TAG, "Connecting to $wsUrl")
@@ -139,6 +144,11 @@ class HaClient(
      * an OkHttp background thread with the body, or null on any failure.
      */
     fun fetchText(path: String, onResult: (String?) -> Unit) {
+        // A blank baseUrl (no credentials configured yet) would make OkHttp throw
+        // on a scheme-less URL — fail soft instead.
+        if (!path.startsWith("http") && !baseUrl.startsWith("http")) {
+            onResult(null); return
+        }
         val url = if (path.startsWith("http")) path else baseUrl.trimEnd('/') + path
         val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
         http.newCall(req).enqueue(object : okhttp3.Callback {

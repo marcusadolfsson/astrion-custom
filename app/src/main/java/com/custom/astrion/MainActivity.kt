@@ -23,6 +23,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.custom.astrion.config.ConfigServer
+import com.custom.astrion.config.ConnectionConfig
 import com.custom.astrion.config.DashboardConfig
 import com.custom.astrion.config.DashboardLoader
 import com.custom.astrion.config.HotkeyConfig
@@ -97,6 +99,13 @@ class MainActivity : ComponentActivity() {
     /** Section whose sole selector should auto-open; consumed by the Dashboard. */
     private var openTarget by mutableStateOf<String?>(null)
 
+    /** Resolved HA base URL (shown in the swipe-up info panel). */
+    private var haUrl by mutableStateOf("")
+
+    /** Setup web server; non-null URL means it's listening (shown in the panel). */
+    private var setupUrl by mutableStateOf<String?>(null)
+    private var configServer: ConfigServer? = null
+
     private val storagePermission = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { reloadDashboard() }
@@ -126,11 +135,28 @@ class MainActivity : ComponentActivity() {
 
         setupMotionWake()
 
-        client = HaClient(baseUrl = BuildConfig.HA_URL, token = BuildConfig.HA_TOKEN)
+        // Credentials come from app-private prefs (seeded once from
+        // /sdcard/astrion/connection.json), NOT from the APK — see ConnectionConfig.
+        val conn = ConnectionConfig.load(this)
+        haUrl = conn.url
+        if (!conn.isComplete) {
+            Toast.makeText(
+                this,
+                "No HA connection configured — push /sdcard/astrion/connection.json",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+        client = HaClient(baseUrl = conn.url, token = conn.token)
         bindHotkeys(dashboard.config.hotkeys, dashboard.config.longHotkeys)
-        client.connect()
-        // One pull from HA on cold launch; after that it's on-demand (info panel / VOICE).
-        syncFromHa()
+        if (conn.isComplete) {
+            client.connect()
+            // One pull from HA on cold launch; after that it's on-demand (panel / VOICE).
+            syncFromHa()
+        } else {
+            // No credentials yet -> open the setup page immediately so a fresh
+            // install can be provisioned from a browser, with no adb.
+            startSetupServer()
+        }
 
         setContent {
             val entities = client.entities.collectAsState()
@@ -148,8 +174,42 @@ class MainActivity : ComponentActivity() {
                 openTarget = openTarget,
                 onOpenHandled = { openTarget = null },
                 onSync = { syncFromHa(manual = true) },
+                haUrl = haUrl,
+                setupUrl = setupUrl,
+                onSetup = { if (setupUrl == null) startSetupServer() else stopSetupServer() },
             )
         }
+    }
+
+    /**
+     * Start the pairing-style setup server (http://<remote-ip>:8099). Mirrors the
+     * stock app's :8080 pairing endpoint. Stops itself once credentials are saved
+     * so it isn't a permanently open write endpoint on the LAN.
+     */
+    private fun startSetupServer() {
+        if (configServer != null) return
+        val srv = ConfigServer { conn ->
+            ConnectionConfig.save(this, conn)
+            runOnUiThread {
+                haUrl = conn.url
+                Toast.makeText(this, "Connection saved — reconnecting", Toast.LENGTH_SHORT).show()
+                // Reconnect with the new credentials, then close setup.
+                client.disconnect()
+                client = HaClient(baseUrl = conn.url, token = conn.token)
+                client.connect()
+                syncFromHa()
+                stopSetupServer()
+            }
+        }
+        configServer = srv
+        srv.start()
+        setupUrl = srv.url
+    }
+
+    private fun stopSetupServer() {
+        configServer?.stop()
+        configServer = null
+        setupUrl = null
     }
 
     override fun onResume() {
@@ -173,6 +233,10 @@ class MainActivity : ComponentActivity() {
      * outcome (for a hotkey `action: "sync"`); the on-resume auto-sync is silent.
      */
     private fun syncFromHa(manual: Boolean = false) {
+        if (haUrl.isBlank()) {
+            if (manual) Toast.makeText(this, "No HA connection configured", Toast.LENGTH_SHORT).show()
+            return
+        }
         client.fetchText(DashboardLoader.REMOTE_PATH) { text ->
             val result = text?.let { DashboardLoader.loadFromText(it) }
             runOnUiThread {
@@ -333,6 +397,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        stopSetupServer()
         sensorManager?.unregisterListener(motionListener)
         client.disconnect()
         super.onDestroy()

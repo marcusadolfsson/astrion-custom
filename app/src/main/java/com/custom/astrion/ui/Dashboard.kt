@@ -66,6 +66,12 @@ fun Dashboard(
     onOpenHandled: () -> Unit = {},
     /** Invoked when the user taps Sync in the swipe-up info panel. */
     onSync: () -> Unit = {},
+    /** Live HA base URL (from ConnectionConfig, not BuildConfig) for the info panel. */
+    haUrl: String = "",
+    /** Non-null while the setup web server is listening (its browsable URL). */
+    setupUrl: String? = null,
+    /** Toggles the setup web server from the info panel. */
+    onSetup: () -> Unit = {},
 ) {
     val entities by entitiesState
     val connection by connectionState
@@ -95,6 +101,14 @@ fun Dashboard(
     }
 
     var showInfo by remember { mutableStateOf(false) }
+
+    // Nothing to show until the app knows which HA to talk to: on a fresh
+    // install, put the setup server's address + port on screen so it can be
+    // provisioned from any browser on the LAN (no adb).
+    if (haUrl.isBlank()) {
+        SetupScreen(setupUrl)
+        return
+    }
 
     Box(
         modifier = Modifier
@@ -130,7 +144,55 @@ fun Dashboard(
         }
 
         if (showInfo) {
-            InfoSheet(onSync = { onSync(); showInfo = false }, onDismiss = { showInfo = false })
+            InfoSheet(
+                haUrl = haUrl,
+                setupUrl = setupUrl,
+                onSetup = onSetup,
+                onSync = { onSync(); showInfo = false },
+                onDismiss = { showInfo = false },
+            )
+        }
+    }
+}
+
+/** First-run screen: tells you where to point a browser to configure the remote. */
+@Composable
+private fun SetupScreen(setupUrl: String?) {
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color(0xFF0E2229)).padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Astrion Custom", color = Color(0xFFF1F4FA), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Not connected to Home Assistant yet.\nOpen this address in a browser on your network:",
+                color = Color(0xFF93AFB6),
+                fontSize = 15.sp,
+            )
+            Spacer(Modifier.height(18.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF16303A))
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+            ) {
+                Text(
+                    setupUrl ?: "starting…",
+                    color = Color(0xFF7FD8F0),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "Enter the HA URL and a long-lived access token.",
+                color = Color(0xFF93AFB6),
+                fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text("Build ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                color = Color(0xFF5E7C86), fontSize = 12.sp)
         }
     }
 }
@@ -140,7 +202,13 @@ fun Dashboard(
  * Dismisses on scrim tap. Replaces the previous sync-on-every-resume behaviour.
  */
 @Composable
-private fun InfoSheet(onSync: () -> Unit, onDismiss: () -> Unit) {
+private fun InfoSheet(
+    haUrl: String,
+    setupUrl: String?,
+    onSetup: () -> Unit,
+    onSync: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -168,7 +236,8 @@ private fun InfoSheet(onSync: () -> Unit, onDismiss: () -> Unit) {
             )
             Text("Astrion Custom", color = Color(0xFFF1F4FA), fontSize = 20.sp, fontWeight = FontWeight.Bold)
             InfoRow("Build", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-            InfoRow("Home Assistant", BuildConfig.HA_URL)
+            InfoRow("Home Assistant", haUrl.ifBlank { "not configured" })
+            if (setupUrl != null) InfoRow("Setup page", setupUrl)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -179,6 +248,24 @@ private fun InfoSheet(onSync: () -> Unit, onDismiss: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text("Sync dashboard", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            }
+            // Opens a LAN web form for the HA URL + token (see ConfigServer), so
+            // credentials never need to be compiled in or pushed over adb.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF2A4954))
+                    .clickable(onClick = onSetup),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (setupUrl == null) "Open connection setup" else "Close setup",
+                    color = Color(0xFFE6F0F1),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                )
             }
         }
     }

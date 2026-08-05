@@ -83,9 +83,9 @@ class BubbleSelectCard : CardRenderer {
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     if (name.isNotBlank()) {
-                        Text(name, color = Color(0xFF93AFB6), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        Text(name, color = Color(0xFF93AFB6), fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
-                    Text(currentName, color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text(currentName, color = Color(0xFFF1F4FA), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Icon(Icons.Filled.ExpandMore, contentDescription = null, tint = Color(0xFF93AFB6))
             }
@@ -95,10 +95,11 @@ class BubbleSelectCard : CardRenderer {
                     val label = opt["name"] as? String ?: return@forEach
                     val selected = opt["active_value"] == currentState
                     DropdownMenuItem(
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
                         text = {
                             Text(
                                 label,
-                                fontSize = 16.sp,
+                                fontSize = 24.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (selected) Color(0xFF2E7D95) else Color.Unspecified,
                             )

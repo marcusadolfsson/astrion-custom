@@ -44,4 +44,6 @@ data class HotkeyConfig(
     val entityId: String? = null,
     val data: Map<String, Any?> = emptyMap(),
     val scrollTo: String? = null,
+    /** Built-in app action, currently just "sync" (re-pull the dashboard from HA). */
+    val action: String? = null,
 )

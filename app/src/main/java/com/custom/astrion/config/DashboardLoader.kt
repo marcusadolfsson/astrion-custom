@@ -44,8 +44,35 @@ import java.io.File
 object DashboardLoader {
     private const val TAG = "DashboardLoader"
 
+    /**
+     * HA-served location of the master layout: /config/www/astrion/dashboard.json
+     * -> http://<ha>/local/astrion/dashboard.json. The app syncs this over the
+     * HA connection into the local cache file below, so layout edits no longer
+     * need `adb push` — edit the file in HA and the app pulls it on next sync.
+     */
+    const val REMOTE_PATH = "/local/astrion/dashboard.json"
+
+    /** Local cache, written by a successful sync; used offline / before first sync. */
     val configFile: File
         get() = File(Environment.getExternalStorageDirectory(), "astrion/dashboard.json")
+
+    /**
+     * Validate freshly-fetched remote JSON and, if valid AND different from the
+     * current cache, write it to the cache and return the parsed config. Returns
+     * null when the text is unchanged (no reload needed) or invalid (cache kept).
+     */
+    fun loadFromText(text: String): Result? {
+        if (runCatching { configFile.readText() }.getOrNull() == text) return null
+        return try {
+            val cfg = parse(text) // throws on malformed JSON
+            configFile.parentFile?.mkdirs()
+            configFile.writeText(text)
+            Result(cfg, null)
+        } catch (e: Exception) {
+            Log.w(TAG, "remote dashboard.json invalid, keeping cache: ${e.message}")
+            null
+        }
+    }
 
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
 
@@ -111,7 +138,8 @@ object DashboardLoader {
             ?.entries?.associate { (k, v) -> k to JsonPlain.toPlain(v) }
             ?: emptyMap()
         val scrollTo = (obj["scroll_to"] as? JsonPrimitive)?.content
-        return HotkeyConfig(key, page, service, entityId, data, scrollTo)
+        val action = (obj["action"] as? JsonPrimitive)?.content
+        return HotkeyConfig(key, page, service, entityId, data, scrollTo, action)
     }
 
     // ---- serialize defaults -------------------------------------------------
@@ -156,6 +184,7 @@ object DashboardLoader {
                 hk.entityId?.let { put("entityId", it) }
                 if (hk.data.isNotEmpty()) put("data", JsonPlain.toJson(hk.data))
                 hk.scrollTo?.let { put("scroll_to", it) }
+                hk.action?.let { put("action", it) }
             })
         }
     }

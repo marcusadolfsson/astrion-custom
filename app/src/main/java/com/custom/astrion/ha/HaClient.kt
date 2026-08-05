@@ -133,6 +133,26 @@ class HaClient(
      * `path` may be absolute or an HA-relative path like /api/media_player_proxy/…;
      * the bearer token is attached so proxied/authenticated art loads too.
      */
+    /**
+     * Fetch a text resource over HTTP (e.g. the dashboard JSON served at
+     * /local/astrion/dashboard.json). Async, fire-and-forget; `onResult` runs on
+     * an OkHttp background thread with the body, or null on any failure.
+     */
+    fun fetchText(path: String, onResult: (String?) -> Unit) {
+        val url = if (path.startsWith("http")) path else baseUrl.trimEnd('/') + path
+        val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
+        http.newCall(req).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                Log.w(TAG, "fetchText failed for $path: ${e.message}")
+                onResult(null)
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: Response) {
+                response.use { onResult(if (it.isSuccessful) it.body?.string() else null) }
+            }
+        })
+    }
+
     suspend fun fetchBitmap(path: String): ImageBitmap? = withContext(Dispatchers.IO) {
         try {
             val url = if (path.startsWith("http")) path else baseUrl.trimEnd('/') + path

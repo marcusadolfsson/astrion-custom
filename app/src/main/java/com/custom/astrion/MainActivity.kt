@@ -151,16 +151,40 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-read the config file on every foreground, so edits (adb push, file
-        // manager) apply without a rebuild or restart.
+        // Show the cached layout instantly, then pull the latest from HA so
+        // layout edits land without adb — just edit the file in HA.
         reloadDashboard()
+        syncFromHa()
     }
 
-    /** Load config from disk and (re)bind hotkeys. Synchronous — the file is tiny. */
+    /** Load config from the local cache and (re)bind hotkeys. Synchronous — tiny file. */
     private fun reloadDashboard() {
         val result = DashboardLoader.load()
         dashboard = result
         bindHotkeys(result.config.hotkeys, result.config.longHotkeys)
+    }
+
+    /**
+     * Pull the master dashboard.json from HA (/local/astrion/dashboard.json),
+     * write it to the local cache and reload if it changed. `manual` toasts the
+     * outcome (for a hotkey `action: "sync"`); the on-resume auto-sync is silent.
+     */
+    private fun syncFromHa(manual: Boolean = false) {
+        client.fetchText(DashboardLoader.REMOTE_PATH) { text ->
+            val result = text?.let { DashboardLoader.loadFromText(it) }
+            runOnUiThread {
+                when {
+                    text == null ->
+                        if (manual) Toast.makeText(this, "Sync failed — HA unreachable", Toast.LENGTH_SHORT).show()
+                    result != null -> {
+                        dashboard = result
+                        bindHotkeys(result.config.hotkeys, result.config.longHotkeys)
+                        if (manual) Toast.makeText(this, "Dashboard updated", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> if (manual) Toast.makeText(this, "Already up to date", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     // ---- hotkeys ------------------------------------------------------------
@@ -187,6 +211,10 @@ class MainActivity : ComponentActivity() {
      */
     private fun runHotkey(hk: HotkeyConfig): Boolean {
         var handled = false
+        if (hk.action?.equals("sync", ignoreCase = true) == true) {
+            syncFromHa(manual = true)
+            handled = true
+        }
         hk.page?.let { pageName ->
             val idx = dashboard.config.pages.indexOfFirst { it.name.equals(pageName, ignoreCase = true) }
             if (idx >= 0) {

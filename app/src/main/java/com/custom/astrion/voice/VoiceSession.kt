@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import com.custom.astrion.config.VoiceConfig
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -33,9 +34,10 @@ sealed class VoiceState {
  * The VOICE key: press, talk, and it ends itself on silence.
  *
  * The remote deliberately makes NO routing decision. It streams the microphone
- * to Home Assistant and HA decides whether the utterance goes to Siri on the
- * Apple TV or through Assist — that policy depends on the AV activity, which is
- * HA's state to know.
+ * to the endpoint named by `voice.path` in the layout and lets the server decide
+ * what to do with it. In this setup that is a custom component which forwards to
+ * Siri on an Apple TV or to HA Assist depending on what is on screen — but any
+ * endpoint accepting a chunked PCM16 body works, so this is not tied to that.
  *
  * The upload is chunked and the request body IS the live microphone: audio
  * leaves the remote while the user is still speaking rather than after they
@@ -69,24 +71,34 @@ class VoiceSession(
     private var capture: MicCapture? = null
     private var job: Job? = null
 
-    /** VOICE key handler: start listening, or cancel if already listening. */
-    fun toggle() {
+    /**
+     * VOICE key handler: start listening, or cancel if already listening.
+     *
+     * `cfg` is passed per press rather than held, so a layout re-sync takes
+     * effect on the next press with no re-wiring.
+     */
+    fun toggle(cfg: VoiceConfig?) {
         if (_state.value is VoiceState.Listening) {
             Log.i(TAG, "cancelled by second press")
             capture?.stop()
             return
         }
-        start()
+        start(cfg ?: VoiceConfig())
     }
 
-    private fun start() {
+    private fun start(cfg: VoiceConfig) {
         if (baseUrl.isBlank() || token.isBlank()) {
             _state.value = VoiceState.Error("No Home Assistant connection")
             autoDismiss()
             return
         }
         job?.cancel()
-        val mic = MicCapture(maxMs = MAX_UTTERANCE_MS, endOnSilence = true)
+        val mic = MicCapture(
+            maxMs = cfg.maxMs,
+            endOnSilence = true,
+            endSilenceMs = cfg.silenceMs,
+            noSpeechMs = cfg.noSpeechMs,
+        )
         capture = mic
         _state.value = VoiceState.Listening
 
@@ -111,7 +123,7 @@ class VoiceSession(
             }
 
             val req = Request.Builder()
-                .url("${baseUrl.trimEnd('/')}$PATH")
+                .url("${baseUrl.trimEnd('/')}${cfg.path}")
                 .addHeader("Authorization", "Bearer $token")
                 .post(body)
                 .build()
@@ -154,8 +166,6 @@ class VoiceSession(
 
     companion object {
         private const val TAG = "AstrionVoice"
-        private const val PATH = "/api/hap_remote/audio"
-        private const val MAX_UTTERANCE_MS = 10_000
         private const val DISMISS_MS = 4_000L
     }
 }

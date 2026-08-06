@@ -18,6 +18,35 @@ data class AppConfig(
     val longHotkeys: List<HotkeyConfig> = emptyList(),
     /** Optional transient volume/mute overlay. */
     val overlay: OverlayConfig? = null,
+    /** Optional VOICE-key config; absent means the key does nothing. */
+    val voice: VoiceConfig? = null,
+)
+
+/**
+ * The VOICE key: press, talk, and it ends itself on silence.
+ *
+ * The remote deliberately makes NO routing decision — it POSTs raw PCM16
+ * (16 kHz, mono) to [path] and lets the server decide what to do with it. Point
+ * it wherever you like: this setup uses a custom component that forwards to
+ * Siri on an Apple TV or to Assist depending on what's on screen, but any
+ * endpoint that accepts a chunked audio body will do.
+ *
+ * The body is streamed as the microphone produces it, so a server can begin
+ * consuming the utterance before the user has finished speaking.
+ */
+data class VoiceConfig(
+    /** Path on the HA base URL that receives the audio stream. */
+    val path: String = "/api/hap_remote/audio",
+    /** Hard cap on one utterance. */
+    val maxMs: Int = 10_000,
+    /** Quiet needed AFTER speech before the utterance is considered finished. */
+    val silenceMs: Int = 1_200,
+    /**
+     * Give up if the user never speaks. Without this an accidental press holds
+     * the microphone — and, on the Siri route, the Apple TV's SIRI button —
+     * open for the whole [maxMs] window.
+     */
+    val noSpeechMs: Int = 4_000,
 )
 
 /**

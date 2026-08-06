@@ -17,7 +17,7 @@ import kotlin.concurrent.thread
  *
  * Frames go to `sink` as they arrive and the caller decides what they are — a
  * WAV on disk, a HA websocket, an Opus encoder. Capture ends on an explicit
- * [stop], on `maxMs`, or — when `endOnSilence` — after roughly END_SILENCE_MS
+ * [stop], on `maxMs`, or — when `endOnSilence` — after roughly `endSilenceMs`
  * of quiet once speech has been heard.
  *
  * That silence rule is not a nicety. **The HA100's VOICE key emits an instant
@@ -29,6 +29,10 @@ import kotlin.concurrent.thread
 class MicCapture(
     private val maxMs: Int = 10_000,
     private val endOnSilence: Boolean = true,
+    /** Quiet needed AFTER speech before the utterance counts as finished. */
+    private val endSilenceMs: Int = 1_200,
+    /** Give up if the user never speaks at all. */
+    private val noSpeechMs: Int = 4_000,
 ) {
     @Volatile private var capturing = false
 
@@ -116,15 +120,15 @@ class MicCapture(
                 if (elapsedMs >= maxMs) break
                 if (endOnSilence) {
                     // Ended talking -> send it.
-                    if (speechHeard && silenceMs >= END_SILENCE_MS) {
+                    if (speechHeard && silenceMs >= endSilenceMs) {
                         Log.i(TAG, "auto-stop: silence after speech (${elapsedMs}ms)")
                         break
                     }
                     // Never started talking -> give up rather than holding the
                     // mic (and, on the Siri route, the SIRI button) for the
                     // full window on an accidental press.
-                    if (!speechHeard && elapsedMs >= NO_SPEECH_TIMEOUT_MS) {
-                        Log.i(TAG, "auto-stop: no speech within ${NO_SPEECH_TIMEOUT_MS}ms")
+                    if (!speechHeard && elapsedMs >= noSpeechMs) {
+                        Log.i(TAG, "auto-stop: no speech within ${noSpeechMs}ms")
                         break
                     }
                 }
@@ -150,9 +154,6 @@ class MicCapture(
         const val BYTES_PER_MS = 32
 
         private const val SPEECH_RMS = 700
-        private const val END_SILENCE_MS = 1_200
-        /** Give up if the user pressed the key but never spoke. */
-        private const val NO_SPEECH_TIMEOUT_MS = 4_000
         private const val TAG = "AstrionMic"
 
         /** Root-mean-square level of a little-endian PCM16 buffer. */

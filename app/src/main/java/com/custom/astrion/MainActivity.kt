@@ -312,7 +312,7 @@ class MainActivity : ComponentActivity() {
         }
         if (hk.action?.equals("voice", ignoreCase = true) == true) {
             // Press to talk; it ends itself on silence. A second press cancels.
-            voice.toggle()
+            voice.toggle(dashboard.config.voice)
             handled = true
         }
         hk.page?.let { pageName ->

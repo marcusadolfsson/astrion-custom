@@ -122,7 +122,15 @@ object DashboardLoader {
                         muteEntity = (o["mute_entity"] as? JsonPrimitive)?.content,
                     )
                 }
-                AppConfig(pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys, overlay)
+                val voice = (root["voice"] as? JsonObject)?.let { v ->
+                    VoiceConfig(
+                        path = (v["path"] as? JsonPrimitive)?.content ?: VoiceConfig().path,
+                        maxMs = (v["max_ms"] as? JsonPrimitive)?.intOrNull ?: VoiceConfig().maxMs,
+                        silenceMs = (v["silence_ms"] as? JsonPrimitive)?.intOrNull ?: VoiceConfig().silenceMs,
+                        noSpeechMs = (v["no_speech_ms"] as? JsonPrimitive)?.intOrNull ?: VoiceConfig().noSpeechMs,
+                    )
+                }
+                AppConfig(pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys, overlay, voice)
             }
             else -> error("top level must be an object or array")
         }

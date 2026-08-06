@@ -290,7 +290,11 @@ class MainActivity : ComponentActivity() {
         short.forEach { hk ->
             val key = runCatching { HardwareKey.valueOf(hk.key.uppercase()) }.getOrNull()
                 ?: return@forEach
-            keyRouter.on(key) { runHotkey(hk) }
+            // Only a plain service call repeats while held. Built-in actions
+            // (voice, sync) and navigation are edge-triggered: auto-repeat would
+            // fire them many times a second.
+            val repeats = hk.action == null && hk.page == null && hk.scrollTo == null
+            keyRouter.on(key, repeats) { runHotkey(hk) }
         }
         long.forEach { hk ->
             val key = runCatching { HardwareKey.valueOf(hk.key.uppercase()) }.getOrNull()
@@ -375,8 +379,11 @@ class MainActivity : ComponentActivity() {
                         keyHandler.postDelayed(r, LONG_PRESS_MS)
                     }
                 } else {
-                    // Short-only: fire on every down (preserves hold-to-repeat).
-                    shortH?.invoke()
+                    // Short-only. Repeats fire again for level-triggered keys
+                    // (volume, channel); edge-triggered ones fire once per press.
+                    if (event.repeatCount == 0 || keyRouter.repeatsWhileHeld(code)) {
+                        shortH?.invoke()
+                    }
                 }
                 return true
             }

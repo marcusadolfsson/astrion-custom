@@ -66,9 +66,17 @@ enum class HardwareKey {
 class HardwareKeyRouter {
     private val shortHandlers = mutableMapOf<HardwareKey, () -> Boolean>()
     private val longHandlers = mutableMapOf<HardwareKey, () -> Boolean>()
+    private val repeatable = mutableSetOf<HardwareKey>()
 
-    fun on(key: HardwareKey, handler: () -> Boolean) {
+    /**
+     * @param repeats whether holding the key should fire the handler again and
+     *   again. True for level-triggered things like volume and channel; FALSE
+     *   for edge-triggered ones like starting a voice capture, where auto-repeat
+     *   would toggle it on and off several times a second.
+     */
+    fun on(key: HardwareKey, repeats: Boolean = true, handler: () -> Boolean) {
         shortHandlers[key] = handler
+        if (repeats) repeatable += key else repeatable -= key
     }
 
     fun onLong(key: HardwareKey, handler: () -> Boolean) {
@@ -79,7 +87,12 @@ class HardwareKeyRouter {
     fun clear() {
         shortHandlers.clear()
         longHandlers.clear()
+        repeatable.clear()
     }
+
+    /** True if holding this key should re-fire its handler. */
+    fun repeatsWhileHeld(code: Int): Boolean =
+        HardwareKey.fromKeyCode(code).let { it != HardwareKey.UNKNOWN && it in repeatable }
 
     fun shortHandler(code: Int): (() -> Boolean)? {
         val key = HardwareKey.fromKeyCode(code)

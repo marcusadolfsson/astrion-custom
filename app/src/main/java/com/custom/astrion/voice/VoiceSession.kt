@@ -70,6 +70,7 @@ class VoiceSession(
 
     private var capture: MicCapture? = null
     private var job: Job? = null
+    private var startedAt = 0L
 
     /**
      * VOICE key handler: start listening, or cancel if already listening.
@@ -79,6 +80,16 @@ class VoiceSession(
      */
     fun toggle(cfg: VoiceConfig?) {
         if (_state.value is VoiceState.Listening) {
+            // Holding the key down must not cancel what the hold just started.
+            // The dispatcher already drops auto-repeats, but some firmware
+            // reports a held key as discrete press/release pairs rather than an
+            // incrementing repeatCount, which would otherwise flip listening on
+            // and off several times a second. Treat anything this quick as part
+            // of the same press.
+            if (System.currentTimeMillis() - startedAt < CANCEL_GRACE_MS) {
+                Log.d(TAG, "ignoring repeat within the hold grace period")
+                return
+            }
             Log.i(TAG, "cancelled by second press")
             capture?.stop()
             return
@@ -100,6 +111,7 @@ class VoiceSession(
             noSpeechMs = cfg.noSpeechMs,
         )
         capture = mic
+        startedAt = System.currentTimeMillis()
         _state.value = VoiceState.Listening
 
         job = scope.launch {
@@ -167,6 +179,9 @@ class VoiceSession(
     companion object {
         private const val TAG = "AstrionVoice"
         private const val DISMISS_MS = 4_000L
+
+        /** A second "press" sooner than this is the same hold, not a cancel. */
+        private const val CANCEL_GRACE_MS = 1_200L
     }
 }
 

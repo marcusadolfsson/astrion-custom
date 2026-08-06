@@ -191,11 +191,16 @@ hotkeys:
     action: voice
 
 voice:
-  path: /api/hap_remote/audio   # anything accepting a chunked PCM16 body
+  path: /api/appletv_siri/audio/living_room   # anything taking a chunked PCM16 body
   max_ms: 10000                 # hard cap on one utterance
   silence_ms: 1200              # quiet AFTER speech before it counts as finished
   no_speech_ms: 4000            # give up if you press the key and never speak
 ```
+
+That path is whatever you want to consume the audio. For sending it to **Siri on
+an Apple TV**, see
+[appletv-siri-voice](https://github.com/marcusadolfsson/appletv-siri-voice),
+which gives each Apple TV its own URL to POST to.
 
 Audio is **16 kHz / mono / PCM16**, which is what HA's Assist pipeline expects
 and also exactly what HAP requires for Siri audio to an Apple TV — so one

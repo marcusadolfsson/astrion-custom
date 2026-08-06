@@ -297,6 +297,18 @@ Note the HA100's VOICE key reports an instant press+release rather than a hold,
 so hold-to-talk isn't possible on this hardware — see
 [docs/FORK_ADDITIONS.md](docs/FORK_ADDITIONS.md#voice).
 
+**Something has to receive that audio.** Any endpoint taking a chunked PCM16
+body will do. If you want the words to reach **Siri on an Apple TV**, that is
+what [appletv-siri-voice](https://github.com/marcusadolfsson/appletv-siri-voice)
+is for — a Home Assistant integration that makes HA appear to an Apple TV as a
+HomeKit remote, so voice from this key lands on Siri exactly as it would from
+the physical Siri Remote. Point `voice.path` at the Apple TV's URL:
+
+```yaml
+voice:
+  path: /api/appletv_siri/audio/living_room
+```
+
 ---
 
 ## Project map

@@ -46,6 +46,8 @@ import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRegistry
 import com.custom.astrion.config.AppConfig
 import com.custom.astrion.config.OverlayConfig
+import com.custom.astrion.voice.VoiceOverlay
+import com.custom.astrion.voice.VoiceState
 import com.custom.astrion.config.PageConfig
 import com.custom.astrion.ha.ConnectionState
 import androidx.compose.runtime.snapshotFlow
@@ -79,6 +81,9 @@ fun Dashboard(
     /** Section a hardware key asked to "open" (auto-pops a sole selector); consumed via onOpenHandled. */
     openTarget: String? = null,
     onOpenHandled: () -> Unit = {},
+    /** Voice indicator state; the VOICE key drives it via VoiceSession. */
+    voiceState: VoiceState = VoiceState.Idle,
+    onVoiceDismiss: () -> Unit = {},
     /** Invoked when the user taps Sync in the swipe-up info panel. */
     onSync: () -> Unit = {},
     /** Live HA base URL (from ConnectionConfig, not BuildConfig) for the info panel. */
@@ -182,6 +187,8 @@ fun Dashboard(
         }
 
         config.overlay?.let { VolumeOverlay(it, ctx) }
+
+        VoiceOverlay(voiceState, onVoiceDismiss)
 
         if (showInfo) {
             InfoSheet(

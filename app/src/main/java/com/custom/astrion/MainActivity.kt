@@ -37,6 +37,7 @@ import com.custom.astrion.input.HardwareKey
 import com.custom.astrion.input.HardwareKeyRouter
 import com.custom.astrion.ui.Dashboard
 import com.custom.astrion.voice.MicProbe
+import com.custom.astrion.voice.VoiceSession
 
 /**
  * Single-activity host. Owns the HA client, wires physical buttons to the
@@ -111,6 +112,9 @@ class MainActivity : ComponentActivity() {
     private var configServer: ConfigServer? = null
     private val micProbe = MicProbe()
 
+    /** VOICE key: capture + stream to HA, which decides Siri vs Assist. */
+    private lateinit var voice: VoiceSession
+
     private val storagePermission = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { reloadDashboard() }
@@ -156,6 +160,7 @@ class MainActivity : ComponentActivity() {
             ).show()
         }
         client = HaClient(baseUrl = conn.url, token = conn.token)
+        voice = VoiceSession(baseUrl = conn.url, token = conn.token)
         bindHotkeys(dashboard.config.hotkeys, dashboard.config.longHotkeys)
         // Load the cached layout first so the initial subscribe is already
         // filtered — avoids a 0.7 MB whole-instance seed on every launch.
@@ -173,6 +178,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val entities = client.entities.collectAsState()
             val connection = client.connection.collectAsState()
+            val voiceState = voice.state.collectAsState()
             Dashboard(
                 client = client,
                 entitiesState = entities,
@@ -189,6 +195,8 @@ class MainActivity : ComponentActivity() {
                 haUrl = haUrl,
                 setupUrl = setupUrl,
                 onSetup = { if (setupUrl == null) startSetupServer() else stopSetupServer() },
+                voiceState = voiceState.value,
+                onVoiceDismiss = { voice.dismiss() },
             )
         }
     }
@@ -300,6 +308,11 @@ class MainActivity : ComponentActivity() {
         var handled = false
         if (hk.action?.equals("sync", ignoreCase = true) == true) {
             syncFromHa(manual = true)
+            handled = true
+        }
+        if (hk.action?.equals("voice", ignoreCase = true) == true) {
+            // Press to talk; it ends itself on silence. A second press cancels.
+            voice.toggle()
             handled = true
         }
         hk.page?.let { pageName ->

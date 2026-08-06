@@ -49,70 +49,93 @@ class MicCapture(
      */
     fun start(sink: (ByteArray, Int) -> Unit, onDone: (Int, Int) -> Unit = { _, _ -> }) {
         if (capturing) return
-        capturing = true
         thread(name = "astrion-mic", isDaemon = true) {
-            val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL, ENCODING)
-            val rec = try {
-                AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
-                    SAMPLE_RATE, CHANNEL, ENCODING,
-                    maxOf(minBuf, CHUNK_BYTES * 2),
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "microphone unavailable: ${e.message}")
-                capturing = false
-                onDone(0, 0)
-                return@thread
-            }
-            if (rec.state != AudioRecord.STATE_INITIALIZED) {
-                Log.e(TAG, "microphone failed to initialize (RECORD_AUDIO not granted?)")
-                rec.release()
-                capturing = false
-                onDone(0, 0)
-                return@thread
-            }
+            val (total, peak) = captureInto(sink)
+            onDone(total, peak)
+        }
+    }
 
-            var total = 0
-            var peak = 0
-            var elapsedMs = 0
-            var speechHeard = false
-            var silenceMs = 0
-            try {
-                rec.startRecording()
-                Log.i(TAG, "capture started")
-                val buf = ByteArray(CHUNK_BYTES) // ~100 ms
-                while (capturing) {
-                    val n = rec.read(buf, 0, buf.size)
-                    if (n <= 0) {
-                        if (n < 0) Log.w(TAG, "AudioRecord.read error: $n")
+    /**
+     * Capture on the CALLING thread, returning (totalBytes, peakRms).
+     *
+     * This is what the voice path uses: called from inside an OkHttp
+     * RequestBody.writeTo, each chunk is written straight to the socket as the
+     * microphone produces it. No queue, no buffering — audio is reaching Siri
+     * (or Assist) while the user is still speaking, which is the difference
+     * between a remote that feels instant and one that feels broken.
+     */
+    fun captureInto(sink: (ByteArray, Int) -> Unit): Pair<Int, Int> {
+        if (capturing) return 0 to 0
+        capturing = true
+        val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL, ENCODING)
+        val rec = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                SAMPLE_RATE, CHANNEL, ENCODING,
+                maxOf(minBuf, CHUNK_BYTES * 2),
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "microphone unavailable: ${e.message}")
+            capturing = false
+            return 0 to 0
+        }
+        if (rec.state != AudioRecord.STATE_INITIALIZED) {
+            Log.e(TAG, "microphone failed to initialize (RECORD_AUDIO not granted?)")
+            rec.release()
+            capturing = false
+            return 0 to 0
+        }
+
+        var total = 0
+        var peak = 0
+        var elapsedMs = 0
+        var speechHeard = false
+        var silenceMs = 0
+        try {
+            rec.startRecording()
+            Log.i(TAG, "capture started")
+            val buf = ByteArray(CHUNK_BYTES) // ~100 ms
+            while (capturing) {
+                val n = rec.read(buf, 0, buf.size)
+                if (n <= 0) {
+                    if (n < 0) Log.w(TAG, "AudioRecord.read error: $n")
+                    break
+                }
+                total += n
+                sink(buf, n)
+
+                elapsedMs += n / BYTES_PER_MS
+                val level = rms(buf, n)
+                if (level > peak) peak = level
+                if (level > SPEECH_RMS) {
+                    speechHeard = true
+                    silenceMs = 0
+                } else if (speechHeard) {
+                    silenceMs += n / BYTES_PER_MS
+                }
+                if (elapsedMs >= maxMs) break
+                if (endOnSilence) {
+                    // Ended talking -> send it.
+                    if (speechHeard && silenceMs >= END_SILENCE_MS) {
+                        Log.i(TAG, "auto-stop: silence after speech (${elapsedMs}ms)")
                         break
                     }
-                    total += n
-                    sink(buf, n)
-
-                    elapsedMs += n / BYTES_PER_MS
-                    val level = rms(buf, n)
-                    if (level > peak) peak = level
-                    if (level > SPEECH_RMS) {
-                        speechHeard = true
-                        silenceMs = 0
-                    } else if (speechHeard) {
-                        silenceMs += n / BYTES_PER_MS
-                    }
-                    if (elapsedMs >= maxMs) break
-                    if (endOnSilence && speechHeard && silenceMs >= END_SILENCE_MS) {
-                        Log.i(TAG, "auto-stop on silence after ${elapsedMs}ms")
+                    // Never started talking -> give up rather than holding the
+                    // mic (and, on the Siri route, the SIRI button) for the
+                    // full window on an accidental press.
+                    if (!speechHeard && elapsedMs >= NO_SPEECH_TIMEOUT_MS) {
+                        Log.i(TAG, "auto-stop: no speech within ${NO_SPEECH_TIMEOUT_MS}ms")
                         break
                     }
                 }
-            } finally {
-                runCatching { rec.stop() }
-                rec.release()
-                capturing = false
-                Log.i(TAG, "capture ended: $total bytes (~${total / BYTES_PER_MS} ms), peak rms=$peak")
-                onDone(total, peak)
             }
+        } finally {
+            runCatching { rec.stop() }
+            rec.release()
+            capturing = false
+            Log.i(TAG, "capture ended: $total bytes (~${total / BYTES_PER_MS} ms), peak rms=$peak")
         }
+        return total to peak
     }
 
     companion object {
@@ -128,6 +151,8 @@ class MicCapture(
 
         private const val SPEECH_RMS = 700
         private const val END_SILENCE_MS = 1_200
+        /** Give up if the user pressed the key but never spoke. */
+        private const val NO_SPEECH_TIMEOUT_MS = 4_000
         private const val TAG = "AstrionMic"
 
         /** Root-mean-square level of a little-endian PCM16 buffer. */

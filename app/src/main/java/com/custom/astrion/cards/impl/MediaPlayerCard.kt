@@ -82,10 +82,15 @@ class MediaPlayerCard : CardRenderer {
             ?: e?.attrString("app_name")
         val artPath = e?.attrString("entity_picture")?.takeIf { it.isNotBlank() }
 
-        // Collapse the full card entirely when there's nothing to show — no real
-        // media title and no cover art (e.g. an idle source); otherwise it would
-        // just render the bare entity name over an empty box.
-        if (full && realTitle == null && artPath == null) return
+        // Collapse the full card entirely when nothing is actually playing.
+        //
+        // A missing media title is the reliable signal. Requiring the artwork to
+        // be missing too does not work: the Kaleidescape keeps serving a
+        // placeholder cover while idle, so `entity_picture` is never null and
+        // the card stayed on screen as a purple square captioned with the
+        // device's own name — the friendly-name fallback below standing in for
+        // a title that was never there.
+        if (full && realTitle == null) return
 
         var art by remember(artPath) { mutableStateOf<ImageBitmap?>(null) }
         LaunchedEffect(artPath) { art = artPath?.let { ctx.client.fetchBitmap(it) } }

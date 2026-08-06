@@ -172,6 +172,71 @@ first values it sees so opening the app doesn't flash it.
 
 ---
 
+## Voice
+
+### The VOICE key streams the microphone
+
+The HA100 has a real microphone (`android.hardware.microphone`, and a
+`MultiMedia1_Capture` PCM device), and the stock app holds `RECORD_AUDIO` as
+`SYSTEM_FIXED`. Upstream never uses it. This fork wires the physical **VOICE**
+key: press, talk, and it ends itself on silence.
+
+**The remote makes no routing decision.** It POSTs raw PCM16 to an endpoint you
+name and lets the server decide what the audio means. Configure it in the
+layout:
+
+```yaml
+hotkeys:
+  - key: VOICE
+    action: voice
+
+voice:
+  path: /api/hap_remote/audio   # anything accepting a chunked PCM16 body
+  max_ms: 10000                 # hard cap on one utterance
+  silence_ms: 1200              # quiet AFTER speech before it counts as finished
+  no_speech_ms: 4000            # give up if you press the key and never speak
+```
+
+Audio is **16 kHz / mono / PCM16**, which is what HA's Assist pipeline expects
+and also exactly what HAP requires for Siri audio to an Apple TV — so one
+capture format serves both with no resampling on a 1 GB MT6580.
+
+### Why the upload is streamed, not buffered
+
+The request body **is** the live microphone: a blocking `MicCapture.captureInto()`
+is driven straight from OkHttp's `RequestBody.writeTo`, with no queue in
+between, and each ~100 ms chunk is flushed as it is read. Audio therefore leaves
+the remote while the user is still speaking. If the far end holds something open
+for the duration of the request — a HomeKit Siri session does exactly that — the
+property matters twice over.
+
+### Ending an utterance without hold-to-talk
+
+**The HA100's VOICE key emits an instant press+release, not a hold**, so
+hold-to-talk is impossible on this hardware and the end of an utterance has to be
+inferred: ~1.2 s of quiet after speech was heard. A separate no-speech timeout
+gives up if the user never speaks, because otherwise an accidental press pins the
+microphone open for the full window. (Credit to
+[vvaters/astrion-ha-dashboard](https://github.com/vvaters/astrion-ha-dashboard),
+which hit the same hardware wall; the thresholds match theirs.)
+
+`VoiceOverlay` shows Listening / Thinking / result in the style of the volume
+OSD — press-and-talk with no visible state is indistinguishable from a broken
+microphone.
+
+### Mic diagnostic
+
+`MicProbe` is **adb-gated on purpose**; an always-listening "record the room"
+HTTP route on a living-room device is a bad trade for a diagnostic:
+
+```
+adb shell am broadcast -a com.custom.astrion.MIC_TEST --ei secs 5 -p com.custom.astrion
+adb pull /sdcard/astrion/mic-test.wav
+```
+
+The `-p <package>` is **required** — Android 8.1 drops implicit broadcasts, and
+the send still reports `result=0` while the receiver never fires.
+
 ## Runtime configuration
 
 ### Credentials are no longer compiled in

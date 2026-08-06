@@ -44,7 +44,8 @@ layout) is unchanged. Each item below landed as its own commit.
 | **Changed cards** | `media_player` transport rework + auto-collapse, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
 | **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
 | **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, swipe-up info panel |
-| **UI** | transient volume / mute overlay |
+| **Voice** | the VOICE key streams the mic to an endpoint you configure; ends on silence |
+| **UI** | transient volume / mute overlay, voice indicator |
 | **Build** | signed, R8-minified release (16 MB → 1.3 MB), bounded Gradle heap |
 | **Performance** | filtered entity subscription, per-key entity observation, card-level pass |
 
@@ -91,7 +92,7 @@ a toolchain — but **adding a brand-new card type means compiling** (see
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
-adb install releases/astrion-custom-0.12.0.apk
+adb install releases/astrion-custom-0.13.0.apk
 ```
 
 **Option B — build from source.** You need:
@@ -279,6 +280,22 @@ The HA100 keycodes live in `input/HardwareKeys.kt`; bindings come from the
 layout's `hotkeys` list, so most changes need no rebuild. The dedicated
 LIGHT / CURTAIN / SCENE / AC and CUSTOM_1..4 keys can each fire a service, jump
 to a page, scroll to a section, or run a built-in action.
+
+### VOICE
+
+`action: voice` turns the VOICE key into press-and-talk: it streams the
+microphone to the endpoint named by `voice.path` and ends itself on ~1.2 s of
+silence. The remote makes no decision about what the audio means — that's the
+server's job. Needs the **microphone permission**, which the app requests on
+first launch; if you skipped the prompt:
+
+```
+adb shell pm grant com.custom.astrion android.permission.RECORD_AUDIO
+```
+
+Note the HA100's VOICE key reports an instant press+release rather than a hold,
+so hold-to-talk isn't possible on this hardware — see
+[docs/FORK_ADDITIONS.md](docs/FORK_ADDITIONS.md#voice).
 
 ---
 

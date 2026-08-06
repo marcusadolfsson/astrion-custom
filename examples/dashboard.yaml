@@ -253,6 +253,17 @@ pages:
         name: Auto target
       - entity_id: sensor.fp2_lr_lux_smoothed
         name: Ambient lux
+voice:
+  # Where the VOICE key streams the microphone: raw PCM16, 16 kHz mono, chunked,
+  # so the server can consume the utterance while it is still being spoken.
+  # Point this anywhere that accepts such a body. In this setup it is a custom
+  # component that forwards to Siri on an Apple TV while the AV activity says
+  # the TV is what you're looking at, and to HA Assist otherwise.
+  path: /api/hap_remote/audio
+  max_ms: 10000        # hard cap on one utterance
+  silence_ms: 1200     # quiet AFTER speech before it counts as finished
+  no_speech_ms: 4000   # give up if you press the key and never speak
+
 overlay:
   # Transient volume/mute OSD on the remote. volume_entity is the CACHE the
   # volume scripts step instantly on the button press (the same one that drives
@@ -310,8 +321,11 @@ hotkeys:
 # just toasts "Unmapped key: 132".
 - key: POWER
   service: script.lr_av_off
+# Press and talk; it ends itself on ~1.2 s of silence (and gives up after 4 s if
+# you never speak). The remote makes NO routing decision - it streams the mic to
+# the `voice.path` endpoint below and the server decides what the audio means.
 - key: VOICE
-  action: sync
+  action: voice
 longHotkeys:
 - key: CENTER
   service: script.lr_av_play_pause

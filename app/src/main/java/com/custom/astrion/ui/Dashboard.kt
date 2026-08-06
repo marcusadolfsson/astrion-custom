@@ -188,7 +188,24 @@ fun Dashboard(
 
         config.overlay?.let { VolumeOverlay(it, ctx) }
 
-        VoiceOverlay(voiceState, onVoiceDismiss)
+        // Prompts are gated on an entity so they can be specific to what is on
+        // (movie searches in front of the Kaleidescape, nothing elsewhere). No
+        // gate entity configured means always show them. Reading the one key
+        // here keeps the per-key observation intact -- see CardContext.
+        val voiceCfg = config.voice
+        val prompts = when {
+            voiceCfg == null || voiceCfg.suggestions.isEmpty() -> emptyList()
+            voiceCfg.suggestEntity == null -> voiceCfg.suggestions
+            ctx.entities[voiceCfg.suggestEntity]?.state == voiceCfg.suggestState ->
+                voiceCfg.suggestions
+            else -> emptyList()
+        }
+        VoiceOverlay(
+            voiceState,
+            onVoiceDismiss,
+            prompts = prompts,
+            promptTitle = voiceCfg?.suggestTitle ?: "Try saying",
+        )
 
         if (showInfo) {
             InfoSheet(

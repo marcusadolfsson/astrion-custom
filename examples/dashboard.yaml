@@ -72,7 +72,9 @@ pages:
           name: Search results
           subtitle_attr: media_title
           open_when: 'on'
-          trigger_label: Show results
+          # Modal only -- a transient answer to something just asked should not
+          # leave a pill occupying the dashboard afterwards.
+          show_trigger: false
           item_font_size: 20
           item_height: 62
   - type: separator
@@ -283,6 +285,22 @@ voice:
   max_ms: 10000        # hard cap on one utterance
   silence_ms: 1200     # quiet AFTER speech before it counts as finished
   no_speech_ms: 4000   # give up if you press the key and never speak
+
+  # Shown while listening, when you are deciding what to say. "Listening…" proves
+  # the mic works but not what the other end UNDERSTANDS, and an undiscoverable
+  # vocabulary gets used for the two phrases you already know. Gated on an entity
+  # so the advice suits what is on - omit suggest_entity to always show it.
+  # Keep these in step with whatever parses the utterance: a suggested phrase
+  # that doesn't actually match is worse than showing nothing.
+  suggest_entity: input_select.lr_av_activity
+  suggest_state: Watch Kaleidescape
+  suggest_title: Try saying
+  suggestions:
+    - play Air Force One
+    - find james bond
+    - show me my movies from the marvel universe
+    - what Kubrick movies do I have
+    - surprise me
 
 overlay:
   # Transient volume/mute OSD on the remote. volume_entity is the CACHE the

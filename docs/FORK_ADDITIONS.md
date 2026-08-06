@@ -289,6 +289,35 @@ adb pull /sdcard/astrion/mic-test.wav
 The `-p <package>` is **required** — Android 8.1 drops implicit broadcasts, and
 the send still reports `result=0` while the receiver never fires.
 
+### Suggested phrases while listening
+
+"Listening…" tells you the microphone works. It does not tell you what the thing
+on the other end *understands* — and a voice interface with no discoverable
+vocabulary gets used for the two phrases you already know, forever. So the
+overlay can show example phrasings, configured in the `voice:` block:
+
+```yaml
+voice:
+  suggest_title: Try saying
+  suggest_entity: input_select.av_activity   # optional gate
+  suggest_state: Watch Kaleidescape
+  suggestions:
+    - play Air Force One
+    - find james bond
+    - what Kubrick movies do I have
+```
+
+They appear at the moment of the press, while the person is deciding what to say,
+and **only in the Listening state** — by Thinking/Done the utterance is already
+spoken and advice about what to say is clutter over the answer.
+
+The gate exists because useful prompts are context-specific: movie searches are
+good advice in front of a media player and noise in front of a TV where the key
+routes to a vendor assistant. Omit `suggest_entity` to always show them.
+
+Keep the lines in step with whatever actually parses them — a suggested phrase
+that the sentence templates don't match is worse than showing nothing.
+
 ## Runtime configuration
 
 ### Credentials are no longer compiled in

@@ -34,7 +34,12 @@ import androidx.compose.ui.unit.sp
  * Tapping it cancels.
  */
 @Composable
-fun BoxScope.VoiceOverlay(state: VoiceState, onDismiss: () -> Unit) {
+fun BoxScope.VoiceOverlay(
+    state: VoiceState,
+    onDismiss: () -> Unit,
+    prompts: List<String> = emptyList(),
+    promptTitle: String = "Try saying",
+) {
     AnimatedVisibility(
         visible = state !is VoiceState.Idle,
         enter = fadeIn(tween(100)) + scaleIn(tween(120), initialScale = 0.9f),
@@ -83,6 +88,28 @@ fun BoxScope.VoiceOverlay(state: VoiceState, onDismiss: () -> Unit) {
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
                 )
+            }
+
+            // Prompts, shown only while actually listening. Deliberately not on
+            // Thinking/Done/Error: by then the utterance is spoken and advice
+            // about what to say is just clutter over the answer.
+            if (state is VoiceState.Listening && prompts.isNotEmpty()) {
+                Text(
+                    text = promptTitle,
+                    color = Color(0xFF7E9AA3),
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 14.dp).fillMaxWidth(),
+                )
+                prompts.forEach { line ->
+                    Text(
+                        text = "“$line”",
+                        color = Color(0xFFD6E6EA),
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+                    )
+                }
             }
         }
     }

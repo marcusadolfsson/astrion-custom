@@ -128,6 +128,13 @@ object DashboardLoader {
                         maxMs = (v["max_ms"] as? JsonPrimitive)?.intOrNull ?: VoiceConfig().maxMs,
                         silenceMs = (v["silence_ms"] as? JsonPrimitive)?.intOrNull ?: VoiceConfig().silenceMs,
                         noSpeechMs = (v["no_speech_ms"] as? JsonPrimitive)?.intOrNull ?: VoiceConfig().noSpeechMs,
+                        suggestions = (v["suggestions"] as? JsonArray)
+                            ?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+                            ?: VoiceConfig().suggestions,
+                        suggestTitle = (v["suggest_title"] as? JsonPrimitive)?.content
+                            ?: VoiceConfig().suggestTitle,
+                        suggestEntity = (v["suggest_entity"] as? JsonPrimitive)?.content,
+                        suggestState = (v["suggest_state"] as? JsonPrimitive)?.content,
                     )
                 }
                 AppConfig(pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys, overlay, voice)

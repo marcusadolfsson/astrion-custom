@@ -47,6 +47,22 @@ data class VoiceConfig(
      * open for the whole [maxMs] window.
      */
     val noSpeechMs: Int = 4_000,
+    /**
+     * Prompts shown while listening -- what you can usefully SAY.
+     *
+     * A microphone that is listening tells you it works but not what it
+     * understands, and a voice interface with no discoverable vocabulary gets
+     * used for the two phrases you already know. These are shown at the moment
+     * of the press, when the person is deciding what to say.
+     *
+     * Gated on an entity so the prompts can be specific to what is on: movie
+     * searches are useful advice in front of a Kaleidescape and noise in front
+     * of anything else. Leave [suggestEntity] unset to always show them.
+     */
+    val suggestions: List<String> = emptyList(),
+    val suggestTitle: String = "Try saying",
+    val suggestEntity: String? = null,
+    val suggestState: String? = null,
 )
 
 /**

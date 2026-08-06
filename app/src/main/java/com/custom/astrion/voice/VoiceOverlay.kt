@@ -53,10 +53,18 @@ fun BoxScope.VoiceOverlay(
                 when (state.route) {
                     "siri" -> "Sent to Apple TV"
                     "assist" -> state.transcript ?: "Sent to Assist"
+                    // A media route already ACTED, so the outcome is the
+                    // headline ("Playing Air Force One") and what was heard
+                    // becomes the subtitle -- the reverse of Assist, where the
+                    // transcript is all the feedback there is.
+                    "kscape" -> state.response ?: state.transcript ?: "Sent"
+                    // Nothing was listening: say so rather than implying the
+                    // utterance went somewhere.
+                    "none" -> "No active source"
                     else -> "Sent"
                 },
-                state.response,
-                Color(0xFF8FE0A8),
+                if (state.route == "kscape") state.transcript else state.response,
+                if (state.route == "none") Color(0xFF9FB4BB) else Color(0xFF8FE0A8),
             )
             is VoiceState.Error -> Triple("Voice failed", state.message, Color(0xFFE08A8A))
             VoiceState.Idle -> Triple("", null, Color.White)

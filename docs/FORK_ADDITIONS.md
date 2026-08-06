@@ -318,6 +318,24 @@ routes to a vendor assistant. Omit `suggest_entity` to always show them.
 Keep the lines in step with whatever actually parses them — a suggested phrase
 that the sentence templates don't match is worse than showing nothing.
 
+### Voice routes that acted, not just listened
+
+The overlay's Done state assumed the utterance was *forwarded* somewhere — it
+showed where it went, and for Assist the transcript, because a transcript is all
+the feedback that path can give.
+
+A route that ACTS has better feedback available, so it is rendered the other way
+round: the outcome is the headline and what was heard sits beneath it.
+
+```
+Playing Air Force One
+the one where the president fights terrorists on a plane
+```
+
+The endpoint supplies that headline in `response`. `route: "none"` — nothing
+active was listening — says "No active source" in a muted colour rather than
+"Sent", which would imply the utterance went somewhere.
+
 ## Runtime configuration
 
 ### Credentials are no longer compiled in

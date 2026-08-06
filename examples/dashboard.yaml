@@ -55,6 +55,26 @@ pages:
             entity_id: remote.kaleidescape_strato_e
             data:
               command: scan_forward
+  # Voice-search results. The list is exposed as a media_player `source_list`
+  # because that is the shape a live, unknown-at-config-time list can take.
+  # source_modal rather than source_select: these results ARRIVE, so they present
+  # themselves as a full-screen modal of large tappable titles the moment a
+  # search lands, instead of hiding one tap deep behind a dropdown row.
+  # `subtitle_attr` shows the phrase that was actually heard.
+  - type: conditional
+    options:
+      entity_id: media_player.kaleidescape_voice_search
+      state: 'on'
+      card:
+        type: source_modal
+        options:
+          entity_id: media_player.kaleidescape_voice_search
+          name: Search results
+          subtitle_attr: media_title
+          open_when: 'on'
+          trigger_label: Show results
+          item_font_size: 20
+          item_height: 62
   - type: separator
     options:
       name: Watch

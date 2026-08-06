@@ -99,6 +99,53 @@ while that source is selected.
 
 Supports `state`, `state_not`, and `state_in`.
 
+### `source_modal`
+
+`source_select`'s big sibling, for a `source_list` that **arrives** rather than
+one you go looking for. source_select is a compact row plus a dropdown — right
+for "which HDMI input?", where the list is short, stable and you went hunting for
+it. This one is for a list that shows up on its own and wants reading from across
+a room: it opens a full-screen modal of large tappable rows.
+
+It was built for a voice search — ask for "james bond" and the remote shows the
+17 matches as thumb-sized rows — but it takes any `media_player` with a
+`source_list`, and picks with `media_player.select_source` exactly as
+source_select does, so the two are interchangeable.
+
+```json
+{ "type": "source_modal", "options": {
+    "entity_id": "media_player.movie_search",
+    "name": "Search results",
+    "subtitle_attr": "media_title",
+    "open_when": "on",
+    "trigger_label": "Show results",
+    "item_font_size": 20, "item_height": 62 } }
+```
+
+| Option | Meaning |
+|---|---|
+| `open_when` | Entity state that auto-opens the modal. Omit for tap-only. |
+| `subtitle_attr` | Attribute shown under the title — e.g. the query that produced the list. |
+| `show_trigger` / `trigger_label` | The inline row that reopens the modal (default on). |
+| `item_font_size` / `item_height` | Row type size and minimum height. |
+| `max_items` | Cap the list; `0` (default) shows all. |
+
+**The auto-open is keyed on the result identity — the `source_list` plus the
+subtitle attribute — not on the entity state.** That is deliberate, and keying it
+on state fails two ways that are easy to miss until it is on a device:
+
+- Wrapped in a `conditional`, the card is only composed while results exist, so
+  it never observes an off→on edge. It is born with the state already matching,
+  and so never opens at all.
+- Two searches in a row both leave the entity `on`. The state does not change
+  between them, so every search after the first stays silent.
+
+Keying on the content handles both. It also makes dismissal behave: closing the
+modal changes neither key, so it stays closed until genuinely new results arrive
+— whereas an implementation that opens *while* the state matches reopens itself
+on the next recomposition and cannot be closed at all. The modal also closes
+itself if the list empties, so a cleared search leaves nothing stranded.
+
 ---
 
 ## Changed cards

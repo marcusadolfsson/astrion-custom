@@ -14,6 +14,12 @@
     <!-- Wake the screen on motion (remote lifted/moved). -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Microphone, for voice. The HA100 has a real mic (android.hardware.
+         microphone + a MultiMedia1_Capture PCM device); the stock app holds
+         this permission as SYSTEM_FIXED. As a normal user app we need it
+         granted at runtime - MainActivity asks on launch. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <application
         android:name=".AstrionApp"
         android:allowBackup="true"

@@ -27,6 +27,7 @@ import com.custom.astrion.config.ConfigServer
 import com.custom.astrion.config.ConnectionConfig
 import com.custom.astrion.config.DashboardConfig
 import com.custom.astrion.config.DashboardLoader
+import android.content.IntentFilter
 import com.custom.astrion.config.EntityRefs
 import com.custom.astrion.config.HotkeyConfig
 import com.custom.astrion.config.JsonPlain
@@ -35,6 +36,7 @@ import com.custom.astrion.ha.ServiceCall
 import com.custom.astrion.input.HardwareKey
 import com.custom.astrion.input.HardwareKeyRouter
 import com.custom.astrion.ui.Dashboard
+import com.custom.astrion.voice.MicProbe
 
 /**
  * Single-activity host. Owns the HA client, wires physical buttons to the
@@ -107,6 +109,7 @@ class MainActivity : ComponentActivity() {
     /** Setup web server; non-null URL means it's listening (shown in the panel). */
     private var setupUrl by mutableStateOf<String?>(null)
     private var configServer: ConfigServer? = null
+    private val micProbe = MicProbe()
 
     private val storagePermission = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -124,16 +127,20 @@ class MainActivity : ComponentActivity() {
                 or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             )
 
-        // /sdcard/astrion/dashboard.json lives on shared storage, so classic
-        // runtime storage permissions are needed (Android 8.1 on the HA100).
-        if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            storagePermission.launch(
-                arrayOf(
-                    Manifest.permission.READ_EXTERNAL_STORAGE,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                )
-            )
-        }
+        // /sdcard/astrion/dashboard.json lives on shared storage, and the mic is
+        // needed for voice — all classic runtime permissions on Android 8.1.
+        // The stock app gets RECORD_AUDIO as SYSTEM_FIXED because it ships as a
+        // system app; we're a normal user app, so we have to ask.
+        val needed = arrayOf(
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            Manifest.permission.RECORD_AUDIO,
+        ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (needed.isNotEmpty()) storagePermission.launch(needed.toTypedArray())
+
+        // adb-only mic diagnostic; see MicProbe. Registered at runtime rather
+        // than in the manifest so it exists only while the app is alive.
+        registerReceiver(micProbe, IntentFilter(MicProbe.ACTION))
 
         setupMotionWake()
 
@@ -410,6 +417,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(micProbe) }
         stopSetupServer()
         sensorManager?.unregisterListener(motionListener)
         client.disconnect()

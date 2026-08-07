@@ -43,11 +43,12 @@ import com.custom.astrion.ha.ServiceCall
  *
  * Two behaviours make it work as a response surface rather than a control:
  *
- *  - `open_when` auto-opens the modal, but on the state TRANSITION into that
- *    value, not while it equals it. Opening on the value would make the modal
- *    unclosable: dismissing it leaves the entity still `on`, so the next
- *    recomposition immediately reopens it. Tracking the previous state means
- *    dismiss sticks until genuinely new results arrive.
+ *  - `open_when` auto-opens the modal ONCE PER RESULT SET, not while the state
+ *    equals that value. Opening on the value would make it unclosable --
+ *    dismissing leaves the entity still `on`, so the next recomposition reopens
+ *    it. And tracking it inside the card is not enough either, because swiping
+ *    to another page disposes the card and takes "already dismissed" with it.
+ *    Identity is tracked outside composition; see SourceModalShown.
  *  - It closes itself when the list empties, so a cleared search doesn't leave
  *    a stale modal sitting over the dashboard.
  *
@@ -97,13 +98,27 @@ class SourceModalCard : CardRenderer {
         //  - Two searches in a row both leave the entity `on`, so the state
         //    never changes between them and a state-keyed effect stays silent
         //    for every search after the first.
-        // Keying on the RESULT IDENTITY instead handles both: a new search
-        // changes the list and/or the query subtitle, while merely dismissing
-        // the modal changes neither -- so dismiss sticks until real new results.
+        // Keying on the RESULT IDENTITY handles both: a new search changes the
+        // list and/or the query subtitle, while merely dismissing the modal
+        // changes neither.
+        //
+        // But identity alone is not enough either, and this is the third way to
+        // get it wrong: `open` and this effect both live in the CARD's
+        // composition, and swiping to another page disposes it. Coming back
+        // rebuilds the card from scratch -- `open` resets to false and the
+        // effect re-runs against keys it has never seen in THIS composition --
+        // so a modal you dismissed reappeared the moment you navigated away and
+        // returned. Which result set has already been shown therefore has to
+        // outlive composition, which is what SourceModalShown is for.
         val openWhen = config.string("open_when")
         val state = e?.state
-        LaunchedEffect(state, sourceListAttr, subtitle) {
-            if (openWhen != null && state == openWhen && sources.isNotEmpty()) open = true
+        val identity = "$state|$sourceListAttr|$subtitle"
+        LaunchedEffect(identity) {
+            if (openWhen != null && state == openWhen && sources.isNotEmpty() &&
+                SourceModalShown.claim(entityId, identity)
+            ) {
+                open = true
+            }
         }
         // A cleared list should never leave the modal stranded.
         if (open && sources.isEmpty()) open = false
@@ -230,5 +245,26 @@ class SourceModalCard : CardRenderer {
                 }
             }
         }
+    }
+}
+
+/**
+ * Which result set each source_modal has already auto-opened for.
+ *
+ * Deliberately outside composition. The card is disposed whenever its page
+ * leaves the screen, so anything remembered inside it -- including "the user
+ * dismissed this" -- is gone by the time they swipe back, and the auto-open
+ * effect cannot tell a genuinely new search from the same one it already
+ * showed. Keyed per entity so two modals never speak for each other.
+ */
+private object SourceModalShown {
+    private val shown = mutableMapOf<String, String>()
+
+    /** True the FIRST time an identity is seen for this entity; false after. */
+    @Synchronized
+    fun claim(entityId: String, identity: String): Boolean {
+        if (shown[entityId] == identity) return false
+        shown[entityId] = identity
+        return true
     }
 }

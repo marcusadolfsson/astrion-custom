@@ -87,7 +87,10 @@ fun StatusBar(is24Hour: Boolean = false) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 4.dp),
+            // Asymmetric on purpose: a little air above so the readouts clear
+            // the screen edge, and less below so they sit close to the content
+            // they label rather than floating between the two.
+            .padding(start = 14.dp, end = 14.dp, top = 9.dp, bottom = 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {

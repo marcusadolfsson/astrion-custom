@@ -94,7 +94,7 @@ fun StatusBar(is24Hour: Boolean = false) {
         Text(
             text = timeFmt.format(now),
             color = Color(0xFF93AFB6),
-            fontSize = 13.sp,
+            fontSize = 15.sp,
         )
         Text(
             text = when {
@@ -105,7 +105,7 @@ fun StatusBar(is24Hour: Boolean = false) {
             // Only the low-battery case earns a colour. A remote that is merely
             // discharging is doing its job; one below 15% is about to stop.
             color = if (batteryPct in 0..14) Color(0xFFE08A8A) else Color(0xFF93AFB6),
-            fontSize = 13.sp,
+            fontSize = 15.sp,
         )
     }
 }

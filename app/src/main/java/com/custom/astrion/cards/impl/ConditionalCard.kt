@@ -37,20 +37,7 @@ class ConditionalCard : CardRenderer {
     @Suppress("UNCHECKED_CAST")
     @Composable
     override fun Render(config: CardConfig, ctx: CardContext) {
-        val entityId = config.string("entity_id")
-        val cur = entityId?.let { ctx.entities[it]?.state }
-        val wantState = config.string("state")
-        val wantNot = config.string("state_not")
-        val stateIn = config.stringList("state_in")
-
-        val show = when {
-            entityId == null -> true
-            stateIn.isNotEmpty() -> cur in stateIn
-            wantState != null -> cur == wantState
-            wantNot != null -> cur != wantNot
-            else -> cur != null
-        }
-        if (!show) return
+        if (!matches(config, ctx)) return
 
         val single = config.options["card"] as? Map<String, Any?>
         val many = config.options["cards"] as? List<Map<String, Any?>>
@@ -69,6 +56,35 @@ class ConditionalCard : CardRenderer {
                 val opts = (child["options"] as? Map<String, Any?>) ?: emptyMap()
                 val renderer = CardRegistry.get(t) ?: return@forEach
                 renderer.Render(CardConfig(t, opts), ctx)
+            }
+        }
+    }
+
+    companion object {
+        /**
+         * Would this conditional show anything?
+         *
+         * Public because the PAGE needs to ask before it lays out. A card that
+         * renders nothing still occupies a LazyColumn slot, and the page spaces
+         * its items with Arrangement.spacedBy -- so N hidden cards leave N gaps
+         * of dead space. The Main page stacks three conditionals above the first
+         * separator, which is why a room with nothing playing showed a large
+         * hole between the status bar and "Watch".
+         *
+         * Kept here, next to Render, so the two can never disagree about what
+         * "visible" means.
+         */
+        fun matches(config: CardConfig, ctx: CardContext): Boolean {
+            val entityId = config.string("entity_id") ?: return true
+            val cur = ctx.entities[entityId]?.state
+            val stateIn = config.stringList("state_in")
+            val wantState = config.string("state")
+            val wantNot = config.string("state_not")
+            return when {
+                stateIn.isNotEmpty() -> cur in stateIn
+                wantState != null -> cur == wantState
+                wantNot != null -> cur != wantNot
+                else -> cur != null
             }
         }
     }

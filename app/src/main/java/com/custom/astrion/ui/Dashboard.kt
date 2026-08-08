@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRegistry
+import com.custom.astrion.cards.impl.ConditionalCard
 import com.custom.astrion.config.AppConfig
 import com.custom.astrion.config.OverlayConfig
 import com.custom.astrion.voice.VoiceOverlay
@@ -466,8 +467,17 @@ private fun PageContent(
             // Index keys: the card list only changes when the layout syncs, and
             // they keep LazyColumn reusing slots instead of re-composing on the
             // list's identity.
-            items(scrolling.size, key = { it }) { i ->
-                RenderCard(scrolling[i], ctx)
+            // Only lay out cards that will actually draw something. A hidden
+            // `conditional` still occupies a slot, and spacedBy(10.dp) puts a
+            // gap around every slot -- so the three conditionals stacked above
+            // the first separator on Main left ~30dp of hole between the status
+            // bar and "Watch" whenever nothing was playing. Filtering here (not
+            // inside the card) is what removes the gap as well as the content.
+            val visible = scrolling.filter {
+                it.type != "conditional" || ConditionalCard.matches(it, ctx)
+            }
+            items(visible.size, key = { it }) { i ->
+                RenderCard(visible[i], ctx)
             }
         }
         if (pinned.isNotEmpty()) {

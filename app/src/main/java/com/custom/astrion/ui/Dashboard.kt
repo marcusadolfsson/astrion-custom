@@ -245,6 +245,11 @@ private fun BoxScope.VolumeOverlay(cfg: OverlayConfig, ctx: CardContext) {
     var lastMuted by remember { mutableStateOf<Boolean?>(null) }
     var seeded by remember { mutableStateOf(false) }
 
+    // Re-read every recomposition so the gate tracks its entity live. Not a
+    // LaunchedEffect key: the OSD should never appear merely because the gate
+    // opened -- only because the volume or mute actually moved.
+    val allowed = cfg.condition?.let { ConditionalCard.matches(it, ctx) } ?: true
+
     LaunchedEffect(vol, muted) {
         val prevV = lastVol
         val prevM = lastMuted
@@ -252,6 +257,11 @@ private fun BoxScope.VolumeOverlay(cfg: OverlayConfig, ctx: CardContext) {
         lastMuted = muted
         if (!seeded) { seeded = true; return@LaunchedEffect }   // first values: don't flash
         if (vol == prevV && muted == prevM) return@LaunchedEffect
+        // Bail AFTER recording the new values, never before: a suppressed change
+        // must be absorbed, or it would read as a fresh change and flash the
+        // moment the gate reopens -- showing "Muted" when you switch back on,
+        // which is the exact thing this suppresses.
+        if (!allowed) return@LaunchedEffect
         visible = true
         kotlinx.coroutines.delay(1500)
         visible = false

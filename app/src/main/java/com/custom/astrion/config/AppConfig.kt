@@ -78,6 +78,16 @@ data class OverlayConfig(
     val volumeEntity: String? = null,
     /** Entity carrying `is_volume_muted` (typically the media_player). */
     val muteEntity: String? = null,
+    /**
+     * Optional gate — the OSD is suppressed while this does not match. Same
+     * shape as a `conditional` card's options (`entity_id` plus one of `state`,
+     * `state_not`, `state_in`), and evaluated by the same code.
+     *
+     * The case this exists for: the speaker gets muted as a side effect of the
+     * system being switched off, and reporting that is noise — the user did not
+     * press mute and the screen they would look at is going dark anyway.
+     */
+    val condition: CardConfig? = null,
 )
 
 /** One swipeable page: a name (used by hotkey `page` navigation) and its cards. */

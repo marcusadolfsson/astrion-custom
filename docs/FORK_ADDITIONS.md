@@ -212,10 +212,42 @@ Top-level in the layout, alongside `pages` and `hotkeys`.
 
 `mute_entity` is read for the `is_volume_muted` attribute.
 
+#### Suppressing it with `condition`
+
+An optional `condition` gates the overlay — while it does not match, volume and
+mute changes are tracked but nothing is drawn:
+
+```json
+"overlay": {
+  "volume_entity": "input_number.sonos_volume_cache",
+  "mute_entity": "media_player.living_room",
+  "condition": {
+    "entity_id": "input_select.av_activity",
+    "state_not": "Off"
+  }
+}
+```
+
+It takes the same shape as a `conditional` card (`entity_id` plus one of `state`,
+`state_not`, `state_in`) and is evaluated by the same code, so there is no second
+condition dialect to learn.
+
+The case it exists for: a system that mutes its speaker as part of shutting down.
+The mute is real, so the overlay dutifully announced it — but nobody pressed mute,
+and the screen being announced to is about to go dark. Gating on "the system is
+not off" leaves genuine mute presses reporting normally.
+
+> **The gate is checked *after* the last-seen values are recorded, never before.**
+> A suppressed change must be absorbed, or it still looks like a change the next
+> time the gate is open — so the overlay flashes **Muted** the moment you switch
+> back *on*, which is worse than the behaviour being fixed.
+
 Two implementation notes if you extend this: the overlay's entities are collected
 explicitly by `EntityRefs` because they are read outside any card (the filtered
-subscription would otherwise never deliver them), and it deliberately ignores the
-first values it sees so opening the app doesn't flash it.
+subscription would otherwise never deliver them) — **including the condition's
+entity, or the gate evaluates against a null state forever and the overlay simply
+never appears** — and it deliberately ignores the first values it sees so opening
+the app doesn't flash it.
 
 ---
 

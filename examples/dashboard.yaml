@@ -308,6 +308,13 @@ overlay:
   # the Envy OSD) - the Sonos's own volume_level lags too much to feel right.
   volume_entity: input_number.lr_sonos_volume_cache
   mute_entity: media_player.living_room
+  # Switching the system off mutes the speaker (turn_off does nothing in eARC
+  # passthrough), and the OSD announced a mute nobody pressed, on a screen you
+  # were done looking at. Gate it on the system not being off; genuine mute
+  # presses still report normally.
+  condition:
+    entity_id: input_select.lr_av_activity
+    state_not: 'Off'
 hotkeys:
 - key: UP
   service: script.lr_av_nav_up

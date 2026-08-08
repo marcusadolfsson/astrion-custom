@@ -120,6 +120,11 @@ object DashboardLoader {
                     OverlayConfig(
                         volumeEntity = (o["volume_entity"] as? JsonPrimitive)?.content,
                         muteEntity = (o["mute_entity"] as? JsonPrimitive)?.content,
+                        // Carried as a CardConfig purely so ConditionalCard.matches
+                        // can evaluate it unchanged; the type string is unused.
+                        condition = (o["condition"] as? JsonObject)?.let { c ->
+                            CardConfig("condition", c.entries.associate { (k, v) -> k to JsonPlain.toPlain(v) })
+                        },
                     )
                 }
                 val voice = (root["voice"] as? JsonObject)?.let { v ->
@@ -198,6 +203,7 @@ object DashboardLoader {
             put("overlay", buildJsonObject {
                 o.volumeEntity?.let { put("volume_entity", it) }
                 o.muteEntity?.let { put("mute_entity", it) }
+                o.condition?.let { put("condition", JsonPlain.toJson(it.options)) }
             })
         }
         put("hotkeys", encodeHotkeys(cfg.hotkeys))

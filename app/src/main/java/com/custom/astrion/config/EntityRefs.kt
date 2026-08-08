@@ -33,6 +33,9 @@ object EntityRefs {
             listOfNotNull(o.volumeEntity, o.muteEntity).forEach {
                 if (ENTITY_ID.matches(it)) out.add(it)
             }
+            // The gate entity too, or the filtered subscription never delivers it
+            // and the condition evaluates against a null state forever.
+            o.condition?.let { walk(it.options, out) }
         }
         (config.hotkeys + config.longHotkeys).forEach { hk ->
             hk.entityId?.let { if (ENTITY_ID.matches(it)) out.add(it) }

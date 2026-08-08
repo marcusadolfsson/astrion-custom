@@ -159,6 +159,9 @@ fun Dashboard(
             .background(Color(0xFF0E2229)),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // Above the banners on purpose: the clock and battery should hold
+            // the same spot whether or not a connection banner is showing.
+            StatusBar()
             ConnectionBanner(connection)
             if (configNotice != null) ConfigNoticeBanner(configNotice)
 

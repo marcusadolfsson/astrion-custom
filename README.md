@@ -92,7 +92,7 @@ a toolchain — but **adding a brand-new card type means compiling** (see
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
-adb install releases/astrion-custom-0.23.0.apk
+adb install releases/astrion-custom-0.23.1.apk
 ```
 
 **Option B — build from source.** You need:
@@ -193,17 +193,23 @@ press wakes the screen **and** runs its action.
 Start it over adb:
 
 ```sh
-adb shell "CLASSPATH=$(adb shell pm path com.custom.astrion | cut -d: -f2) \
-  app_process /system/bin com.custom.astrion.bridge.InputBridge"
+adb shell 'sh /data/user_de/0/com.custom.astrion/start-bridge.sh &'
 ```
 
-You do not need to compose that by hand — the app shows the exact command, with
-this install's apk path already filled in, in the swipe-down sheet under
-**Screen-off keys**. Tap it to copy. The path changes on every reinstall, which
-is why it is resolved at runtime rather than written down.
+The app writes that script itself on every launch, with this install's apk path
+baked in — so the command stays short and constant while the part that actually
+moves is regenerated behind it. (The apk path changes on every reinstall, which
+is why it is not written down anywhere.)
 
-The sheet also shows whether the bridge is currently `connected` or
-`not running`.
+The swipe-down sheet shows the same command under **Screen-off keys**, along
+with whether the bridge is currently `connected` or `not running`. Tap the
+command to copy it.
+
+Drop the `&` if you would rather watch it — it prints `listening on
+127.0.0.1:8098` and logs each client as the app attaches, which is reassuring
+the first time.
+
+To stop it: `adb shell pkill -f app_process`
 
 #### Restarting it after a reboot
 
@@ -214,15 +220,15 @@ time. On the HA100 network adb does not survive a reboot either, so:
 
 ```sh
 # 1. plug in USB
-adb tcpip 5555                       # re-enable network adb (runtime only)
-adb connect <remote-ip>:5555         # optional, if you prefer working wirelessly
-# 2. start the bridge (or copy the command from the swipe-down sheet)
-adb shell "CLASSPATH=$(adb shell pm path com.custom.astrion | cut -d: -f2) \
-  app_process /system/bin com.custom.astrion.bridge.InputBridge"
+adb tcpip 5555                    # re-enable network adb (runtime only)
+adb connect <remote-ip>:5555      # optional, if you prefer to work wirelessly
+
+# 2. start the bridge
+adb shell 'sh /data/user_de/0/com.custom.astrion/start-bridge.sh &'
 ```
 
-Leave the shell open, or background it — when that process exits, screen-off
-keys stop and everything reverts to normal two-press behaviour.
+Open the app once before step 2 if you have just reinstalled it — the script is
+regenerated on launch, so a fresh install needs one run to write it.
 
 > **Nothing breaks without it.** The feature is strictly additive: the app
 > retries the connection quietly and treats a missing bridge as the normal case,

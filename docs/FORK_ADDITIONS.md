@@ -332,6 +332,19 @@ runtime:
 CLASSPATH=<apk> app_process /system/bin com.custom.astrion.bridge.InputBridge
 ```
 
+The app writes that into a launcher script in device-protected storage on every
+launch, so what a user actually types is short and never changes:
+
+```sh
+adb shell 'sh /data/user_de/0/<pkg>/start-bridge.sh &'
+```
+
+Worth doing rather than documenting the long form: the apk path changes on every
+reinstall, so a written-down command goes stale. Device-protected storage is
+readable before first unlock — which is when you want to start the bridge after a
+reboot — and the file must be world-readable, because the shell that runs it is
+not the app.
+
 It opens `/dev/input/event*` directly, parses raw evdev structs, and serves one
 line per key edge on `127.0.0.1:8098`:
 

@@ -38,6 +38,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.custom.astrion.bridge.BridgeClient
+import com.custom.astrion.ha.BatteryReporter
 import com.custom.astrion.input.HardwareKeyRouter
 import com.custom.astrion.ui.Dashboard
 import com.custom.astrion.voice.MicProbe
@@ -108,6 +109,13 @@ class MainActivity : ComponentActivity() {
      * rather than by two tables kept in step by hand.
      */
     private var bridgeConnected by mutableStateOf(false)
+    /**
+     * The remote's battery, published to HA so it can be charted. Nothing else
+     * can see it: this is not a HA-managed device, so without this the only
+     * readings are spot values taken over adb while someone is looking.
+     */
+    private val battery by lazy { BatteryReporter(this, client, lifecycleScope) }
+
     private val bridge by lazy {
         BridgeClient(scope = lifecycleScope) { key ->
             keyRouter.shortHandlerFor(key)?.invoke()
@@ -229,6 +237,7 @@ class MainActivity : ComponentActivity() {
         }
 
         bridge.start()
+        battery.start()
         // Poll the client's flag for display only. A StateFlow would be tidier,
         // but the bridge is deliberately not load-bearing and this costs one
         // comparison a second.

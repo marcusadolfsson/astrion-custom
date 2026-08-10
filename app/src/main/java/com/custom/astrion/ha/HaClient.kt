@@ -16,6 +16,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -186,6 +188,33 @@ class HaClient(
 
             override fun onResponse(call: okhttp3.Call, response: Response) {
                 response.use { onResult(if (it.isSuccessful) it.body?.string() else null) }
+            }
+        })
+    }
+
+    /**
+     * POST a JSON body, fire-and-forget. Used to publish a state back to Home
+     * Assistant (`/api/states/<entity>`), which the WebSocket API cannot do --
+     * it calls services, and setting a state is not a service.
+     */
+    fun postJson(path: String, json: String) {
+        if (!baseUrl.startsWith("http")) return
+        val url = baseUrl.trimEnd('/') + path
+        val body = json.toRequestBody("application/json".toMediaType())
+        val req = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $token")
+            .post(body)
+            .build()
+        http.newCall(req).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                Log.w(TAG, "postJson failed for $path: ${e.message}")
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) Log.w(TAG, "postJson $path -> HTTP ${it.code}")
+                }
             }
         })
     }

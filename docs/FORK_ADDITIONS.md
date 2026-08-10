@@ -385,6 +385,41 @@ helper, the same approach Shizuku and Key Mapper take.
 - **Resolve the apk path at runtime** when showing the command to a user. It
   changes on every reinstall.
 
+## Battery reported back to Home Assistant
+
+The remote publishes its own battery level as `sensor.astrion_remote_battery`,
+so it can be charted and alerted on like any other sensor.
+
+Worth having because the battery is otherwise invisible from Home Assistant: the
+remote is not a HA-managed device and has no integration, so the only readings
+available are spot values pulled over adb. Answering anything about *drain* needs
+a recorded series, not a reading.
+
+```
+state          68
+device_class   battery
+state_class    measurement
+unit           %
+attributes     charging: true|false
+```
+
+`state_class: measurement` is the part that matters — it puts the sensor into
+long-term statistics, so the curve outlives the recorder's purge window rather
+than being a rolling few days.
+
+### Two implementation notes
+
+**It uses REST, not the WebSocket the app already holds.** The WS API calls
+services, and setting a state is not a service — `POST /api/states/<entity>` is
+the only way to publish a value HA does not already know about. That is the one
+place in the app that speaks HTTP.
+
+**REST-created states do not survive an HA restart.** The entity disappears
+until the next post. The reporter therefore posts on every level change (so the
+curve keeps its shape) plus a five-minute heartbeat — short enough that a restart
+leaves a blip rather than a hole, long enough that a device which spends its life
+asleep is not woken to report a number that has not moved.
+
 ---
 
 ## Voice

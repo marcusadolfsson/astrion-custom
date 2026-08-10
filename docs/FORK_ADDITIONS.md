@@ -249,6 +249,41 @@ entity, or the gate evaluates against a null state forever and the overlay simpl
 never appears** — and it deliberately ignores the first values it sees so opening
 the app doesn't flash it.
 
+### Screen-edge gestures
+
+The bottom bar answers a swipe **up** with the info/sync panel. `gestures` adds
+its mirror at the top: swipe **down** on the status strip to fire a named action.
+
+```json
+"gestures": {
+  "swipe_down": { "action": "app_info", "package": "com.example.app" }
+}
+```
+
+Top-level in the layout, alongside `pages` and `hotkeys`. Two actions:
+
+| action | opens |
+|---|---|
+| `android_settings` | the system Settings app |
+| `app_info` | a package's App info screen — `package` is required |
+
+`app_info` is the useful one on a device whose OEM launcher misbehaves: that
+screen carries **Force stop**, and **Enable** for a disabled package. On the
+HA100 the stock launcher holds a partial wake lock for as long as it runs — one
+unbroken 68-hour hold in testing, so the device never deep-slept — and a
+force-stop clears it. The app returns on every boot, so the fix has to be
+repeatable; this makes it two taps rather than a laptop and an adb cable.
+
+> **Do not disable an OEM launcher package outright.** On the HA100,
+> `pm disable-user` on the launcher bricks the device into a bootloop that safe
+> mode, recovery and factory reset cannot reach. Repeating a harmless force-stop
+> is the supported shape of this workaround.
+
+Actions are a closed set rather than an arbitrary intent string: the layout is
+fetched over the network, and "launch anything" is a much larger surface than
+this needs. The launch is wrapped so a missing Settings activity does nothing
+rather than taking the dashboard down.
+
 ---
 
 ## Voice

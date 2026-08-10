@@ -20,6 +20,35 @@ data class AppConfig(
     val overlay: OverlayConfig? = null,
     /** Optional VOICE-key config; absent means the key does nothing. */
     val voice: VoiceConfig? = null,
+    /** Optional screen-edge gestures; absent means they do nothing. */
+    val gestures: GesturesConfig? = null,
+)
+
+/**
+ * Screen-edge gestures. The bottom bar already answers a swipe UP with the
+ * info/sync panel; this is its mirror at the top of the screen.
+ *
+ * Config shape:
+ *   { "gestures": { "swipe_down": {
+ *       "action": "app_info", "package": "com.example.app"
+ *   } } }
+ */
+data class GesturesConfig(
+    val swipeDown: GestureAction? = null,
+)
+
+/**
+ * What a gesture does. Deliberately a small closed set of NAMED actions rather
+ * than an arbitrary intent string: the layout is fetched over the network, and
+ * "launch any intent you like" is a much larger surface than this needs.
+ *
+ *   android_settings  open the system Settings app
+ *   app_info          open a package's App info screen -- the one carrying
+ *                     Force stop, and Enable for a disabled package
+ */
+data class GestureAction(
+    val action: String,
+    val packageName: String? = null,
 )
 
 /**

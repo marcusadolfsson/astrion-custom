@@ -315,6 +315,18 @@ overlay:
   condition:
     entity_id: input_select.lr_av_activity
     state_not: 'Off'
+# Swipe DOWN on the status strip -> the stock launcher's App info screen, which
+# is where Force stop lives. That launcher holds a partial wake lock the whole
+# time it runs, so the device never deep-sleeps; force-stopping it costs nothing
+# but has to be repeated after each boot, and this makes that two taps.
+#
+# NOT pm disable-user on that package -- it is the launcher, and disabling it
+# bricks the HA100 beyond safe mode and recovery. The same screen re-enables a
+# package, so this is also the way back.
+gestures:
+  swipe_down:
+    action: app_info
+    package: com.aiks.HaRemote
 hotkeys:
 - key: UP
   service: script.lr_av_nav_up

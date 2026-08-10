@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,7 +45,7 @@ import java.util.Locale
  * when looked at, invisible when not.
  */
 @Composable
-fun StatusBar(is24Hour: Boolean = false) {
+fun StatusBar(is24Hour: Boolean = false, onSwipeDown: (() -> Unit)? = null) {
     val context = LocalContext.current
 
     // Tick every 10s rather than every second: the display only shows minutes,
@@ -87,6 +89,20 @@ fun StatusBar(is24Hour: Boolean = false) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // Mirror of the bottom bar's swipe-up: drag down on this strip to
+            // reach whatever `gestures.swipe_down` points at. The stock
+            // launcher used to own a swipe-down panel here, so the muscle
+            // memory already exists.
+            .pointerInput(onSwipeDown) {
+                if (onSwipeDown != null) {
+                    detectVerticalDragGestures { change, dragAmount ->
+                        if (dragAmount > 6f) {
+                            change.consume()
+                            onSwipeDown()
+                        }
+                    }
+                }
+            }
             // Asymmetric on purpose: a little air above so the readouts clear
             // the screen edge, and less below so they sit close to the content
             // they label rather than floating between the two.

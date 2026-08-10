@@ -7,6 +7,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import com.custom.astrion.BuildConfig
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -96,6 +100,7 @@ fun Dashboard(
 ) {
     val connection by connectionState
     val scope = rememberCoroutineScope()
+    val gestureContext = LocalContext.current
 
     // PERFORMANCE: deliberately do NOT read the entity map here. Reading it in
     // this scope would recompose the entire dashboard (every card, both pages)
@@ -162,7 +167,25 @@ fun Dashboard(
         Column(modifier = Modifier.fillMaxSize()) {
             // Above the banners on purpose: the clock and battery should hold
             // the same spot whether or not a connection banner is showing.
-            StatusBar()
+            StatusBar(onSwipeDown = config.gestures?.swipeDown?.let { g ->
+                {
+                    // Named actions only -- the layout arrives over the network,
+                    // so "launch any intent" would be a far wider door than this
+                    // needs. Wrapped because a missing Settings activity should
+                    // do nothing, not take the dashboard down.
+                    runCatching {
+                        val intent = when (g.action) {
+                            "app_info" -> Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:${g.packageName}"),
+                            )
+                            else -> Intent(Settings.ACTION_SETTINGS)
+                        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        gestureContext.startActivity(intent)
+                    }
+                    Unit
+                }
+            })
             ConnectionBanner(connection)
             if (configNotice != null) ConfigNoticeBanner(configNotice)
 

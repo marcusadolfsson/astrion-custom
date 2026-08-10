@@ -127,6 +127,18 @@ object DashboardLoader {
                         },
                     )
                 }
+                val gestures = (root["gestures"] as? JsonObject)?.let { g ->
+                    GesturesConfig(
+                        swipeDown = (g["swipe_down"] as? JsonObject)?.let { s ->
+                            (s["action"] as? JsonPrimitive)?.content?.let { act ->
+                                GestureAction(
+                                    action = act,
+                                    packageName = (s["package"] as? JsonPrimitive)?.content,
+                                )
+                            }
+                        },
+                    )
+                }
                 val voice = (root["voice"] as? JsonObject)?.let { v ->
                     VoiceConfig(
                         path = (v["path"] as? JsonPrimitive)?.content ?: VoiceConfig().path,
@@ -142,7 +154,7 @@ object DashboardLoader {
                         suggestState = (v["suggest_state"] as? JsonPrimitive)?.content,
                     )
                 }
-                AppConfig(pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys, overlay, voice)
+                AppConfig(pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys, overlay, voice, gestures)
             }
             else -> error("top level must be an object or array")
         }
@@ -204,6 +216,14 @@ object DashboardLoader {
                 o.volumeEntity?.let { put("volume_entity", it) }
                 o.muteEntity?.let { put("mute_entity", it) }
                 o.condition?.let { put("condition", JsonPlain.toJson(it.options)) }
+            })
+        }
+        cfg.gestures?.swipeDown?.let { g ->
+            put("gestures", buildJsonObject {
+                put("swipe_down", buildJsonObject {
+                    put("action", g.action)
+                    g.packageName?.let { put("package", it) }
+                })
             })
         }
         put("hotkeys", encodeHotkeys(cfg.hotkeys))

@@ -34,6 +34,10 @@ import com.custom.astrion.config.JsonPlain
 import com.custom.astrion.ha.HaClient
 import com.custom.astrion.ha.ServiceCall
 import com.custom.astrion.input.HardwareKey
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import com.custom.astrion.bridge.BridgeClient
 import com.custom.astrion.input.HardwareKeyRouter
 import com.custom.astrion.ui.Dashboard
 import com.custom.astrion.voice.MicProbe
@@ -92,6 +96,24 @@ class MainActivity : ComponentActivity() {
     private lateinit var client: HaClient
     private val keyRouter = HardwareKeyRouter()
 
+    /**
+     * Screen-off keys. Purely additive: when the bridge is not running (its
+     * normal state, since it must be started over adb and dies on reboot) this
+     * simply never fires and Android's own dispatch is unchanged. When it IS
+     * running, the press that wakes the screen also runs its action instead of
+     * being swallowed by PhoneWindowManager.
+     *
+     * It routes through the SAME handler table as dispatchKeyEvent, so a
+     * screen-off press and a screen-on press are the same thing by construction
+     * rather than by two tables kept in step by hand.
+     */
+    private var bridgeConnected by mutableStateOf(false)
+    private val bridge by lazy {
+        BridgeClient(scope = lifecycleScope) { key ->
+            keyRouter.shortHandlerFor(key)?.invoke()
+        }
+    }
+
     /** Current layout: starts as the compiled-in defaults, replaced from disk. */
     private var dashboard by mutableStateOf(DashboardLoader.Result(DashboardConfig.default, null))
 
@@ -118,6 +140,16 @@ class MainActivity : ComponentActivity() {
     private val storagePermission = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { reloadDashboard() }
+
+    /**
+     * The exact command to start the input bridge, with THIS install's apk path
+     * filled in. The path changes on every reinstall, so a hardcoded one in the
+     * docs would send people chasing a ClassNotFoundException; resolving it here
+     * means the sheet always shows something that works.
+     */
+    private fun bridgeCommand(): String =
+        "CLASSPATH=${applicationInfo.sourceDir} app_process /system/bin " +
+            "com.custom.astrion.bridge.InputBridge"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -175,6 +207,17 @@ class MainActivity : ComponentActivity() {
             startSetupServer()
         }
 
+        bridge.start()
+        // Poll the client's flag for display only. A StateFlow would be tidier,
+        // but the bridge is deliberately not load-bearing and this costs one
+        // comparison a second.
+        lifecycleScope.launch {
+            while (true) {
+                if (bridgeConnected != bridge.connected) bridgeConnected = bridge.connected
+                delay(1000)
+            }
+        }
+
         setContent {
             val entities = client.entities.collectAsState()
             val connection = client.connection.collectAsState()
@@ -197,6 +240,8 @@ class MainActivity : ComponentActivity() {
                 onSetup = { if (setupUrl == null) startSetupServer() else stopSetupServer() },
                 voiceState = voiceState.value,
                 onVoiceDismiss = { voice.dismiss() },
+                bridgeConnected = bridgeConnected,
+                bridgeCommand = bridgeCommand(),
             )
         }
     }

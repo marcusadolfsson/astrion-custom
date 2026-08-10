@@ -41,3 +41,9 @@
 # the manifest references by name.
 -keep class com.custom.astrion.AstrionApp { *; }
 -keep class com.custom.astrion.MainActivity { *; }
+
+# The input bridge is an ENTRY POINT reached only from a shell:
+#   CLASSPATH=<apk> app_process /system/bin com.custom.astrion.bridge.InputBridge
+# Nothing in the app references it, so R8 would strip it and the command would
+# fail with ClassNotFoundException at a moment when debugging means adb.
+-keep class com.custom.astrion.bridge.** { *; }

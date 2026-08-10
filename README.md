@@ -92,7 +92,7 @@ a toolchain — but **adding a brand-new card type means compiling** (see
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
-adb install releases/astrion-custom-0.21.0.apk
+adb install releases/astrion-custom-0.23.0.apk
 ```
 
 **Option B — build from source.** You need:
@@ -183,7 +183,59 @@ your own hotkey.
 
 <img src="examples/screenshots/09-keymapper-rule.png" width="380" alt="Key Mapper rule">
 
-### 5. Reach system settings without a launcher
+### 5. Optional: keys that work with the screen off
+
+By default, the press that wakes the screen is **swallowed** — Android's
+`PhoneWindowManager` consumes it to light the display, and only your *second*
+press does anything. The input bridge fixes that: with it running, the first
+press wakes the screen **and** runs its action.
+
+Start it over adb:
+
+```sh
+adb shell "CLASSPATH=$(adb shell pm path com.custom.astrion | cut -d: -f2) \
+  app_process /system/bin com.custom.astrion.bridge.InputBridge"
+```
+
+You do not need to compose that by hand — the app shows the exact command, with
+this install's apk path already filled in, in the swipe-down sheet under
+**Screen-off keys**. Tap it to copy. The path changes on every reinstall, which
+is why it is resolved at runtime rather than written down.
+
+The sheet also shows whether the bridge is currently `connected` or
+`not running`.
+
+#### Restarting it after a reboot
+
+**The bridge does not survive a reboot, and cannot.** Reading `/dev/input`
+requires group 1004 (`input`) and the `input_device` SELinux label; nothing on
+the device can grant an app either, so it has to be started from a shell every
+time. On the HA100 network adb does not survive a reboot either, so:
+
+```sh
+# 1. plug in USB
+adb tcpip 5555                       # re-enable network adb (runtime only)
+adb connect <remote-ip>:5555         # optional, if you prefer working wirelessly
+# 2. start the bridge (or copy the command from the swipe-down sheet)
+adb shell "CLASSPATH=$(adb shell pm path com.custom.astrion | cut -d: -f2) \
+  app_process /system/bin com.custom.astrion.bridge.InputBridge"
+```
+
+Leave the shell open, or background it — when that process exits, screen-off
+keys stop and everything reverts to normal two-press behaviour.
+
+> **Nothing breaks without it.** The feature is strictly additive: the app
+> retries the connection quietly and treats a missing bridge as the normal case,
+> not an error. Screen-off presses run the *same* actions as screen-on ones,
+> because the bridge feeds the same handler table rather than a parallel map.
+
+> **Why not just sign the app as system?** Because it would not work.
+> `sharedUserId=android.uid.system` puts the app in the `system_app` SELinux
+> domain, which is not in group 1004 and has no `input_device` access either —
+> it would install, run as system, and still be denied. An app cannot escalate
+> to fix that: `su` refuses callers that are not already root or shell.
+
+### 6. Reach system settings without a launcher
 
 With this app as home there is no stock launcher UI, so it carries its own way
 into Android's settings: **swipe down on the status strip**.
@@ -195,7 +247,7 @@ Configured under `gestures.swipe_down` (see
 App info row is worth including for any package you may need to Force stop or
 re-Enable later — it is also the way back if a package is ever disabled.
 
-### 6. Point the app at Home Assistant
+### 7. Point the app at Home Assistant
 
 On first launch the app has no credentials and shows its own setup address:
 
@@ -209,7 +261,7 @@ on `/sdcard` where any app with storage permission could read them. The setup
 server stops as soon as they're saved; reopen it later from the swipe-up info
 panel.
 
-### 7. Add your layout
+### 8. Add your layout
 
 The app fetches a JSON layout from Home Assistant over the connection you just
 configured. **This fork ships `REMOTE_PATH = "/api/astrion_dashboard"`**, so the

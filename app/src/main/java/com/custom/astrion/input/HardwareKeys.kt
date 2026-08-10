@@ -56,6 +56,46 @@ enum class HardwareKey {
         )
 
         fun fromKeyCode(code: Int): HardwareKey = MAP[code] ?: UNKNOWN
+
+        /**
+         * RAW KERNEL scancodes from /dev/input/event1 (mt_gpio_kpd), as read by
+         * the input bridge. These are Linux KEY_* codes, NOT Android keycodes --
+         * a different numbering entirely, which is why this is a separate table
+         * rather than a few extra entries above.
+         *
+         * Measured on the device by pressing each button with the bridge running
+         * and naming them in order; corroborated independently by Key Mapper,
+         * which recorded the red button as F8 (66) exactly as this table says.
+         *
+         * The F-key positions are the four coloured buttons and the four labelled
+         * shortcuts, which is how the HA100 wires its top rows.
+         */
+        private val SCAN_MAP: Map<Int, HardwareKey> = mapOf(
+            59 to HOME,          // KEY_F1
+            61 to VOICE,         // KEY_F3
+            62 to LIGHT,         // KEY_F4
+            63 to CURTAIN,       // KEY_F5  (labelled "shade")
+            64 to SCENE,         // KEY_F6  (labelled "music")
+            65 to AC,            // KEY_F7
+            66 to CUSTOM_1,      // KEY_F8   red
+            67 to CUSTOM_2,      // KEY_F9   green
+            68 to CUSTOM_3,      // KEY_F10  blue
+            87 to CUSTOM_4,      // KEY_F11  yellow
+            103 to UP,
+            104 to PAGE_UP,
+            105 to LEFT,
+            106 to RIGHT,
+            108 to DOWN,
+            109 to PAGE_DOWN,
+            113 to MUTE,
+            114 to VOLUME_DOWN,
+            115 to VOLUME_UP,
+            139 to MENU,
+            158 to BACK,
+            353 to CENTER,       // KEY_SELECT
+        )
+
+        fun fromScanCode(code: Int): HardwareKey = SCAN_MAP[code] ?: UNKNOWN
     }
 }
 
@@ -93,6 +133,15 @@ class HardwareKeyRouter {
     /** True if holding this key should re-fire its handler. */
     fun repeatsWhileHeld(code: Int): Boolean =
         HardwareKey.fromKeyCode(code).let { it != HardwareKey.UNKNOWN && it in repeatable }
+
+    /**
+     * Handlers by logical key, for callers that already resolved one -- the
+     * input bridge delivers kernel scancodes, not Android keycodes, and routing
+     * them through the SAME handler table is what makes a screen-off press do
+     * exactly what a screen-on press does.
+     */
+    fun shortHandlerFor(key: HardwareKey): (() -> Boolean)? =
+        if (key == HardwareKey.UNKNOWN) null else shortHandlers[key]
 
     fun shortHandler(code: Int): (() -> Boolean)? {
         val key = HardwareKey.fromKeyCode(code)

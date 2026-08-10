@@ -319,6 +319,59 @@ Play over a playing film.
 > rewind, not chapter skip. The real `NEXT` / `PREVIOUS` are top-level protocol
 > commands and need a helper that speaks to the player directly.
 
+## Input bridge — keys while the screen is off
+
+By default the press that wakes the screen is consumed by `PhoneWindowManager`
+and never dispatched, so only the second press does anything. `bridge/` adds an
+optional helper that removes that limitation.
+
+`InputBridge` is an **entry point run as a shell process**, not part of the app's
+runtime:
+
+```sh
+CLASSPATH=<apk> app_process /system/bin com.custom.astrion.bridge.InputBridge
+```
+
+It opens `/dev/input/event*` directly, parses raw evdev structs, and serves one
+line per key edge on `127.0.0.1:8098`:
+
+```
+KEY <scancode> <1=down|0=up|2=repeat>
+```
+
+`BridgeClient` (in the app) connects, translates the scancode through
+`HardwareKey.SCAN_MAP`, and invokes **the same handler table** as
+`dispatchKeyEvent` — so a screen-off press and a screen-on press are the same
+action by construction, not two lists kept in step by hand.
+
+### Why it cannot live inside the app
+
+`/dev/input/eventN` is `root:input` mode 0660 with SELinux label `input_device`.
+Opening it needs group **1004 (`input`)** *and* a permitted domain. An app is
+`untrusted_app` and has neither.
+
+Platform-signing does **not** solve this: `sharedUserId=android.uid.system` gives
+the `system_app` domain, which is also not in group 1004 and also has no
+`input_device` access. And an app cannot escalate to obtain them — AOSP's `su`
+refuses any caller that is not already root or `shell`. Hence a shell-started
+helper, the same approach Shizuku and Key Mapper take.
+
+### Design notes if you extend it
+
+- **Strictly additive.** The bridge cannot survive a reboot, so it is absent more
+  often than present. The client retries quietly and logs at debug; a missing
+  bridge is the normal case, not a fault. Never make anything depend on it.
+- **The struct is 16 bytes on 32-bit ARM** (two 4-byte `timeval` fields), 24 on
+  64-bit. Get this wrong and you get plausible-looking garbage codes rather than
+  an error.
+- **Repeats (`value 2`) are dropped.** A thumb resting on a remote key is not a
+  request to fire an action twenty times.
+- **The class needs a proguard keep rule.** Nothing in the app references it, so
+  R8 strips it and the launch fails with `ClassNotFoundException` — at the exact
+  moment debugging costs an adb session.
+- **Resolve the apk path at runtime** when showing the command to a user. It
+  changes on every reinstall.
+
 ---
 
 ## Voice

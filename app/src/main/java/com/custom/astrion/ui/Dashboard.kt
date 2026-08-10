@@ -17,6 +17,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.shape.CircleShape
@@ -40,8 +42,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import com.custom.astrion.BuildConfig
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -97,6 +101,10 @@ fun Dashboard(
     setupUrl: String? = null,
     /** Toggles the setup web server from the info panel. */
     onSetup: () -> Unit = {},
+    /** True while the input bridge is connected (screen-off keys available). */
+    bridgeConnected: Boolean = false,
+    /** The exact adb command that starts the bridge, apk path resolved. */
+    bridgeCommand: String = "",
 ) {
     val connection by connectionState
     val scope = rememberCoroutineScope()
@@ -149,7 +157,6 @@ fun Dashboard(
         onNavHandled()
     }
 
-    var showInfo by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
 
     // Nothing to show until the app knows which HA to talk to: on a fresh
@@ -192,7 +199,7 @@ fun Dashboard(
                 pages = config.pages,
                 current = pagerState.currentPage,
                 onDotClick = { i -> scope.launch { pagerState.animateScrollToPage(i) } },
-                onSwipeUp = { showInfo = true },
+                onSwipeUp = { showSettings = true },
             )
         }
 
@@ -220,6 +227,12 @@ fun Dashboard(
         config.gestures?.swipeDown?.takeIf { showSettings }?.let { panel ->
             SettingsSheet(
                 panel = panel,
+                haUrl = haUrl,
+                setupUrl = setupUrl,
+                onSetup = onSetup,
+                onSync = { onSync(); showSettings = false },
+                bridgeConnected = bridgeConnected,
+                bridgeCommand = bridgeCommand,
                 onPick = { item ->
                     showSettings = false
                     // Launch from the ACTIVITY and WITHOUT FLAG_ACTIVITY_NEW_TASK,
@@ -242,15 +255,6 @@ fun Dashboard(
             )
         }
 
-        if (showInfo) {
-            InfoSheet(
-                haUrl = haUrl,
-                setupUrl = setupUrl,
-                onSetup = onSetup,
-                onSync = { onSync(); showInfo = false },
-                onDismiss = { showInfo = false },
-            )
-        }
     }
 }
 
@@ -364,6 +368,29 @@ private fun BoxScope.VolumeOverlay(cfg: OverlayConfig, ctx: CardContext) {
     }
 }
 
+/**
+ * Maps a named gesture action to its Settings intent. Every one of these was
+ * checked to resolve on the HA100's Android 8.1 build before being offered -- a
+ * sheet row that resolves to nothing is worse than no row.
+ */
+private fun intentFor(item: com.custom.astrion.config.GestureAction): Intent = when (item.action) {
+    "app_info" -> Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.parse("package:${item.packageName}"),
+    )
+    "wifi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
+    "display" -> Intent(Settings.ACTION_DISPLAY_SETTINGS)
+    "sound" -> Intent(Settings.ACTION_SOUND_SETTINGS)
+    "bluetooth" -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+    "apps" -> Intent(Settings.ACTION_APPLICATION_SETTINGS)
+    "date" -> Intent(Settings.ACTION_DATE_SETTINGS)
+    "storage" -> Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
+    "developer" -> Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+    "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+    "device_info" -> Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
+    else -> Intent(Settings.ACTION_SETTINGS)
+}
+
 /** First-run screen: tells you where to point a browser to configure the remote. */
 @Composable
 private fun SetupScreen(setupUrl: String?) {
@@ -406,113 +433,19 @@ private fun SetupScreen(setupUrl: String?) {
     }
 }
 
-/**
- * Swipe-up info panel: current build, the HA endpoint, and a manual Sync button.
- * Dismisses on scrim tap. Replaces the previous sync-on-every-resume behaviour.
- */
-@Composable
-private fun InfoSheet(
-    haUrl: String,
-    setupUrl: String?,
-    onSetup: () -> Unit,
-    onSync: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xAA000000))
-            .clickable(onClick = onDismiss),
-    ) {
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-                .background(Color(0xFF16303A))
-                // Absorb taps so they don't fall through to the dismiss scrim.
-                .clickable(enabled = false) {}
-                .padding(horizontal = 22.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .width(44.dp)
-                    .height(5.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color(0xFF33525E)),
-            )
-            Text("Astrion Custom", color = Color(0xFFF1F4FA), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            InfoRow("Build", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-            InfoRow("Home Assistant", haUrl.ifBlank { "not configured" })
-            if (setupUrl != null) InfoRow("Setup page", setupUrl)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF2E7D95))
-                    .clickable(onClick = onSync),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("Sync dashboard", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            }
-            // Opens a LAN web form for the HA URL + token (see ConfigServer), so
-            // credentials never need to be compiled in or pushed over adb.
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF2A4954))
-                    .clickable(onClick = onSetup),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (setupUrl == null) "Open connection setup" else "Close setup",
-                    color = Color(0xFFE6F0F1),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-        }
-    }
-}
-
-/**
- * Maps a named gesture action to its Settings intent. Every one of these was
- * checked against the HA100's Android 8.1 build before being offered -- a menu
- * entry that resolves to nothing is worse than no entry.
- */
-private fun intentFor(item: com.custom.astrion.config.GestureAction): Intent = when (item.action) {
-    "app_info" -> Intent(
-        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-        Uri.parse("package:${item.packageName}"),
-    )
-    "wifi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
-    "display" -> Intent(Settings.ACTION_DISPLAY_SETTINGS)
-    "sound" -> Intent(Settings.ACTION_SOUND_SETTINGS)
-    "bluetooth" -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-    "apps" -> Intent(Settings.ACTION_APPLICATION_SETTINGS)
-    "date" -> Intent(Settings.ACTION_DATE_SETTINGS)
-    "storage" -> Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
-    "developer" -> Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
-    "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-    "device_info" -> Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
-    else -> Intent(Settings.ACTION_SETTINGS)
-}
-
-/**
- * The swipe-down sheet. Anchored to the TOP because that is where the gesture
- * came from; the info sheet is the same shape hanging off the bottom.
- */
 @Composable
 private fun SettingsSheet(
     panel: com.custom.astrion.config.GesturePanel,
     onPick: (com.custom.astrion.config.GestureAction) -> Unit,
     onDismiss: () -> Unit,
+    haUrl: String,
+    setupUrl: String?,
+    onSetup: () -> Unit,
+    onSync: () -> Unit,
+    bridgeConnected: Boolean,
+    bridgeCommand: String,
 ) {
+    val clipboard = LocalClipboardManager.current
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -525,8 +458,8 @@ private fun SettingsSheet(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp))
                 .background(Color(0xFF16303A))
-                // Absorb taps so they don't fall through to the dismiss scrim.
                 .clickable(enabled = false) {}
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 22.dp, vertical = 18.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -544,21 +477,62 @@ private fun SettingsSheet(
                         .padding(horizontal = 14.dp, vertical = 13.dp),
                 )
             }
-            // Tapping outside works too, but on a screen this small an explicit
-            // way out is worth the row -- especially as the destinations here
-            // are full-screen system activities.
-            Text(
-                "Close",
-                color = Color(0xFF93AFB6),
-                fontSize = 15.sp,
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable(onClick = onDismiss)
-                    .padding(horizontal = 18.dp, vertical = 8.dp),
-            )
+
+            Spacer(Modifier.height(4.dp))
+            Text("Screen-off keys", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            InfoRow("Input bridge", if (bridgeConnected) "connected" else "not running")
+            if (!bridgeConnected) {
+                // Shown only when it is missing, and it explains itself: the app
+                // cannot start this. /dev/input needs group 1004 and the
+                // input_device SELinux label, which no app has and none can be
+                // granted -- so it takes a shell, every boot.
+                Text(
+                    "Keys work normally without this. Start it over adb to make the " +
+                        "press that wakes the screen also do its job:",
+                    color = Color(0xFF93AFB6),
+                    fontSize = 13.sp,
+                )
+                Text(
+                    bridgeCommand,
+                    color = Color(0xFFD7E3EA),
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF0E2229))
+                        .clickable { clipboard.setText(AnnotatedString(bridgeCommand)) }
+                        .padding(10.dp),
+                )
+                Text("tap to copy", color = Color(0xFF6E8A93), fontSize = 11.sp)
+            }
+
+            Spacer(Modifier.height(4.dp))
+            Text("Astrion Custom", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            InfoRow("Build", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            InfoRow("Home Assistant", haUrl.ifBlank { "not configured" })
+            InfoRow("Setup server", setupUrl ?: "off")
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SheetButton("Sync", onSync)
+                SheetButton(if (setupUrl == null) "Setup on" else "Setup off", onSetup)
+                SheetButton("Close", onDismiss)
+            }
         }
     }
+}
+
+@Composable
+private fun SheetButton(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = Color(0xFFD7E3EA),
+        fontSize = 14.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1E3841))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    )
 }
 
 @Composable

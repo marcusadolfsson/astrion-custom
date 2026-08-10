@@ -325,8 +325,29 @@ overlay:
 # package, so this is also the way back.
 gestures:
   swipe_down:
-    action: app_info
-    package: com.aiks.HaRemote
+    title: Device
+    items:
+    # First because it is the one with a job: the stock launcher holds a partial
+    # wake lock the whole time it runs, so the device never deep-sleeps. Force
+    # stop clears it, but the app is back after every boot -- this makes
+    # repeating it two taps rather than a laptop and an adb cable.
+    #
+    # NOT pm disable-user on that package -- it is the launcher, and disabling it
+    # bricks the HA100 beyond safe mode and recovery. This screen also carries
+    # Enable, so it is the way back if a package ever is disabled.
+    - name: Force stop HaRemote
+      action: app_info
+      package: com.aiks.HaRemote
+    - name: Wi-Fi
+      action: wifi
+    - name: Display
+      action: display
+    - name: Sound
+      action: sound
+    - name: Apps
+      action: apps
+    - name: All settings
+      action: settings
 hotkeys:
 - key: UP
   service: script.lr_av_nav_up

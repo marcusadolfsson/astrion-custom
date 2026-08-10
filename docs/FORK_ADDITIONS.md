@@ -252,20 +252,26 @@ the app doesn't flash it.
 ### Screen-edge gestures
 
 The bottom bar answers a swipe **up** with the info/sync panel. `gestures` adds
-its mirror at the top: swipe **down** on the status strip to fire a named action.
+its mirror at the top: swipe **down** on the status strip to open a sheet of
+shortcuts into system Settings.
 
 ```json
 "gestures": {
-  "swipe_down": { "action": "app_info", "package": "com.example.app" }
+  "swipe_down": {
+    "title": "Device",
+    "items": [
+      { "name": "Force stop X", "action": "app_info", "package": "com.example.x" },
+      { "name": "Wi-Fi",        "action": "wifi" },
+      { "name": "All settings", "action": "settings" }
+    ]
+  }
 }
 ```
 
-Top-level in the layout, alongside `pages` and `hotkeys`. Two actions:
-
-| action | opens |
-|---|---|
-| `android_settings` | the system Settings app |
-| `app_info` | a package's App info screen — `package` is required |
+Top-level in the layout, alongside `pages` and `hotkeys`. Actions:
+`app_info` (needs `package`), `settings`, `wifi`, `display`, `sound`,
+`bluetooth`, `apps`, `date`, `storage`, `developer`, `accessibility`,
+`device_info`.
 
 `app_info` is the useful one on a device whose OEM launcher misbehaves: that
 screen carries **Force stop**, and **Enable** for a disabled package. On the
@@ -278,6 +284,12 @@ repeatable; this makes it two taps rather than a laptop and an adb cable.
 > `pm disable-user` on the launcher bricks the device into a bootloop that safe
 > mode, recovery and factory reset cannot reach. Repeating a harmless force-stop
 > is the supported shape of this workaround.
+
+> **Launch from the Activity, with no intent flags.** An earlier version used
+> `FLAG_ACTIVITY_NEW_TASK`, which puts Settings in a task of its own: BACK then
+> only descends Settings' internal stack, and on a device whose launcher is
+> stopped there is nothing behind it — no way back to the dashboard at all.
+> Without the flag it stacks on the app's own task and BACK returns.
 
 Actions are a closed set rather than an arbitrary intent string: the layout is
 fetched over the network, and "launch anything" is a much larger surface than

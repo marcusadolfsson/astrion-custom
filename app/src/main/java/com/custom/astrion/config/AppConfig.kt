@@ -34,19 +34,33 @@ data class AppConfig(
  *   } } }
  */
 data class GesturesConfig(
-    val swipeDown: GestureAction? = null,
+    val swipeDown: GesturePanel? = null,
 )
 
 /**
- * What a gesture does. Deliberately a small closed set of NAMED actions rather
- * than an arbitrary intent string: the layout is fetched over the network, and
- * "launch any intent you like" is a much larger surface than this needs.
+ * A sheet of shortcuts opened by a gesture. A LIST rather than a single action
+ * because one destination is never enough in practice -- the OEM launcher's
+ * App info screen is what prompted this, but Wi-Fi and Display get wanted just
+ * as often, and one extra gesture per destination is not a design.
+ */
+data class GesturePanel(
+    val title: String = "Device",
+    val items: List<GestureAction> = emptyList(),
+)
+
+/**
+ * One row in the sheet. A closed set of NAMED actions rather than an arbitrary
+ * intent string: the layout is fetched over the network, and "launch anything"
+ * is a far larger surface than this needs.
  *
- *   android_settings  open the system Settings app
- *   app_info          open a package's App info screen -- the one carrying
- *                     Force stop, and Enable for a disabled package
+ *   app_info       a package's App info screen (needs `package`) -- carries
+ *                  Force stop, and Enable for a disabled package
+ *   settings       system Settings
+ *   wifi / display / sound / bluetooth / apps / date / storage /
+ *   developer / accessibility / device_info
  */
 data class GestureAction(
+    val name: String,
     val action: String,
     val packageName: String? = null,
 )

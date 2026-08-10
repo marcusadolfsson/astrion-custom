@@ -150,6 +150,7 @@ fun Dashboard(
     }
 
     var showInfo by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
 
     // Nothing to show until the app knows which HA to talk to: on a fresh
     // install, put the setup server's address + port on screen so it can be
@@ -167,25 +168,7 @@ fun Dashboard(
         Column(modifier = Modifier.fillMaxSize()) {
             // Above the banners on purpose: the clock and battery should hold
             // the same spot whether or not a connection banner is showing.
-            StatusBar(onSwipeDown = config.gestures?.swipeDown?.let { g ->
-                {
-                    // Named actions only -- the layout arrives over the network,
-                    // so "launch any intent" would be a far wider door than this
-                    // needs. Wrapped because a missing Settings activity should
-                    // do nothing, not take the dashboard down.
-                    runCatching {
-                        val intent = when (g.action) {
-                            "app_info" -> Intent(
-                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                Uri.parse("package:${g.packageName}"),
-                            )
-                            else -> Intent(Settings.ACTION_SETTINGS)
-                        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        gestureContext.startActivity(intent)
-                    }
-                    Unit
-                }
-            })
+            StatusBar(onSwipeDown = config.gestures?.swipeDown?.let { { showSettings = true } })
             ConnectionBanner(connection)
             if (configNotice != null) ConfigNoticeBanner(configNotice)
 
@@ -233,6 +216,31 @@ fun Dashboard(
             prompts = prompts,
             promptTitle = voiceCfg?.suggestTitle ?: "Try saying",
         )
+
+        config.gestures?.swipeDown?.takeIf { showSettings }?.let { panel ->
+            SettingsSheet(
+                panel = panel,
+                onPick = { item ->
+                    showSettings = false
+                    // Launch from the ACTIVITY and WITHOUT FLAG_ACTIVITY_NEW_TASK,
+                    // so Settings stacks on this app's task and BACK walks back
+                    // here. With NEW_TASK it lands in a task of its own, BACK
+                    // only descends Settings' own stack, and on a device whose
+                    // launcher is stopped there is then nothing to return to --
+                    // which stranded the first version of this.
+                    runCatching {
+                        val a = gestureContext as? android.app.Activity
+                        val intent = intentFor(item)
+                        if (a != null) a.startActivity(intent)
+                        else gestureContext.startActivity(
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                    Unit
+                },
+                onDismiss = { showSettings = false },
+            )
+        }
 
         if (showInfo) {
             InfoSheet(
@@ -468,6 +476,87 @@ private fun InfoSheet(
                     fontWeight = FontWeight.Medium,
                 )
             }
+        }
+    }
+}
+
+/**
+ * Maps a named gesture action to its Settings intent. Every one of these was
+ * checked against the HA100's Android 8.1 build before being offered -- a menu
+ * entry that resolves to nothing is worse than no entry.
+ */
+private fun intentFor(item: com.custom.astrion.config.GestureAction): Intent = when (item.action) {
+    "app_info" -> Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.parse("package:${item.packageName}"),
+    )
+    "wifi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
+    "display" -> Intent(Settings.ACTION_DISPLAY_SETTINGS)
+    "sound" -> Intent(Settings.ACTION_SOUND_SETTINGS)
+    "bluetooth" -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+    "apps" -> Intent(Settings.ACTION_APPLICATION_SETTINGS)
+    "date" -> Intent(Settings.ACTION_DATE_SETTINGS)
+    "storage" -> Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
+    "developer" -> Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+    "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+    "device_info" -> Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
+    else -> Intent(Settings.ACTION_SETTINGS)
+}
+
+/**
+ * The swipe-down sheet. Anchored to the TOP because that is where the gesture
+ * came from; the info sheet is the same shape hanging off the bottom.
+ */
+@Composable
+private fun SettingsSheet(
+    panel: com.custom.astrion.config.GesturePanel,
+    onPick: (com.custom.astrion.config.GestureAction) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xAA000000))
+            .clickable(onClick = onDismiss),
+    ) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp))
+                .background(Color(0xFF16303A))
+                // Absorb taps so they don't fall through to the dismiss scrim.
+                .clickable(enabled = false) {}
+                .padding(horizontal = 22.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(panel.title, color = Color(0xFFF1F4FA), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            panel.items.forEach { item ->
+                Text(
+                    item.name,
+                    color = Color(0xFFD7E3EA),
+                    fontSize = 17.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1E3841))
+                        .clickable { onPick(item) }
+                        .padding(horizontal = 14.dp, vertical = 13.dp),
+                )
+            }
+            // Tapping outside works too, but on a screen this small an explicit
+            // way out is worth the row -- especially as the destinations here
+            // are full-screen system activities.
+            Text(
+                "Close",
+                color = Color(0xFF93AFB6),
+                fontSize = 15.sp,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onDismiss)
+                    .padding(horizontal = 18.dp, vertical = 8.dp),
+            )
         }
     }
 }

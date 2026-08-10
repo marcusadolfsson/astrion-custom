@@ -130,12 +130,19 @@ object DashboardLoader {
                 val gestures = (root["gestures"] as? JsonObject)?.let { g ->
                     GesturesConfig(
                         swipeDown = (g["swipe_down"] as? JsonObject)?.let { s ->
-                            (s["action"] as? JsonPrimitive)?.content?.let { act ->
-                                GestureAction(
-                                    action = act,
-                                    packageName = (s["package"] as? JsonPrimitive)?.content,
-                                )
-                            }
+                            GesturePanel(
+                                title = (s["title"] as? JsonPrimitive)?.content ?: "Device",
+                                items = (s["items"] as? JsonArray).orEmpty().mapNotNull { i ->
+                                    val o = i as? JsonObject ?: return@mapNotNull null
+                                    val act = (o["action"] as? JsonPrimitive)?.content
+                                        ?: return@mapNotNull null
+                                    GestureAction(
+                                        name = (o["name"] as? JsonPrimitive)?.content ?: act,
+                                        action = act,
+                                        packageName = (o["package"] as? JsonPrimitive)?.content,
+                                    )
+                                },
+                            )
                         },
                     )
                 }
@@ -221,8 +228,16 @@ object DashboardLoader {
         cfg.gestures?.swipeDown?.let { g ->
             put("gestures", buildJsonObject {
                 put("swipe_down", buildJsonObject {
-                    put("action", g.action)
-                    g.packageName?.let { put("package", it) }
+                    put("title", g.title)
+                    put("items", buildJsonArray {
+                        g.items.forEach { i ->
+                            add(buildJsonObject {
+                                put("name", i.name)
+                                put("action", i.action)
+                                i.packageName?.let { put("package", it) }
+                            })
+                        }
+                    })
                 })
             })
         }

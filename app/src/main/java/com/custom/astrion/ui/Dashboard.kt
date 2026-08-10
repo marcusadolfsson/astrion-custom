@@ -250,6 +250,13 @@ private fun BoxScope.VolumeOverlay(cfg: OverlayConfig, ctx: CardContext) {
     // opened -- only because the volume or mute actually moved.
     val allowed = cfg.condition?.let { ConditionalCard.matches(it, ctx) } ?: true
 
+    // The gate closing must also take down anything already on screen. Switching
+    // the system off mutes the speaker and then settles the volume a moment
+    // later, so the sequence is: mute arrives while still allowed and shows the
+    // overlay, THEN the activity goes Off, THEN the volume lands -- restarting
+    // the effect below and cancelling the coroutine that owed us a hide.
+    LaunchedEffect(allowed) { if (!allowed) visible = false }
+
     LaunchedEffect(vol, muted) {
         val prevV = lastVol
         val prevM = lastMuted
@@ -261,10 +268,20 @@ private fun BoxScope.VolumeOverlay(cfg: OverlayConfig, ctx: CardContext) {
         // must be absorbed, or it would read as a fresh change and flash the
         // moment the gate reopens -- showing "Muted" when you switch back on,
         // which is the exact thing this suppresses.
-        if (!allowed) return@LaunchedEffect
-        visible = true
-        kotlinx.coroutines.delay(1500)
-        visible = false
+        //
+        // And clear on the way out. Returning here without hiding is what left
+        // the overlay stuck on: the previous invocation was cancelled mid-delay
+        // (so its hide never ran) and this one returned before reaching one.
+        if (!allowed) { visible = false; return@LaunchedEffect }
+        // try/finally because this coroutine is cancelled every time the volume
+        // moves again -- without it, each cancellation drops the hide on the
+        // floor and only the LAST change in a burst is ever cleaned up.
+        try {
+            visible = true
+            kotlinx.coroutines.delay(1500)
+        } finally {
+            visible = false
+        }
     }
 
     AnimatedVisibility(

@@ -24,9 +24,9 @@ any action you want. Nothing depends on Sanytron's cloud or their HA integration
 |---|---|---|
 | ![Display](examples/screenshots/08-display-section.png) | ![Volume](examples/screenshots/06-volume-overlay.png) | ![Mute](examples/screenshots/07-mute-overlay.png) |
 
-| Status page | …continued |
-|---|---|
-| ![Status](examples/screenshots/04-status.png) | ![Status lower](examples/screenshots/05-status-lower.png) |
+| Status page | …continued | Settings sheet |
+|---|---|---|
+| ![Status](examples/screenshots/04-status.png) | ![Status lower](examples/screenshots/05-status-lower.png) | ![Settings sheet](examples/screenshots/12-settings-sheet.png) |
 
 The layout behind these shots is [`examples/dashboard.yaml`](examples/dashboard.yaml)
 — a real, in-use configuration rather than a toy one.
@@ -133,39 +133,67 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 > **Keep that key forever.** Android only allows in-place updates when the
 > signature matches; a different key means uninstalling first.
 
-### 4. Launch it with Key Mapper
+### 4. Make it the launcher
 
-The stock `HaRemote` app is a **system app and the device's launcher** — don't
-try to replace it, the firmware will relaunch it. Instead bind a hardware key to
-open this app.
-
-Install [Key Mapper](https://github.com/keymapperorg/KeyMapper) (FOSS build):
+The stock `HaRemote` app is a system app **and the device's launcher**. Set this
+app as home instead — that single preference is also the biggest battery win
+available on this hardware:
 
 ```sh
-adb install keymapper.apk
+adb shell cmd package set-home-activity com.custom.astrion/.MainActivity
 ```
 
-Enable its accessibility service, then create one key map:
+`MainActivity` already declares `CATEGORY_HOME`, so it is eligible; the command
+just makes it preferred. To go back:
 
-* **Trigger** — the Home key (it reports as **`F1`** on this hardware)
-* **Action** — Open app → *Astrion Custom*
-* **Constraint** — *HaRemote is in foreground*
+```sh
+adb shell cmd package set-home-activity com.aiks.HaRemote/.boot.RemoteApp
+```
+
+**Why this matters beyond convenience.** The stock app holds a
+`PARTIAL_WAKE_LOCK` for as long as it runs — measured here as one unbroken
+68-hour hold, meaning the device had never entered deep sleep since boot. With
+this app preferred as home the stock app **never starts**: its `boot.RemoteApp`
+component is its launcher entry, not an independent boot hook. Verified across a
+reboot — the preference survives, Home goes straight to the dashboard, and the
+system reports no wake locks held.
+
+> **Do not disable the stock launcher.** It is tempting to go further and run
+> `pm disable-user com.aiks.HaRemote`. **Don't.** Disabling the launcher leaves
+> the HA100 in a permanent bootloop, and on this hardware safe mode, recovery
+> mode and factory reset are all unreachable once that happens — the only way
+> back is BROM/preloader mode with SP Flash Tool, signed MediaTek USB drivers
+> and firmware from the vendor. At least one owner has bricked a unit this way.
+> Setting the home-activity preference reaches the same result, disables
+> nothing, and reverts with one command.
+
+Related: network adb does **not** survive a reboot on this device.
+`adb tcpip 5555` sets only the runtime property, and `persist.adb.tcp.port` is
+ignored by this build, so after every reboot you need USB again. Treat anything
+boot-related as a one-shot test and keep the cable to hand.
+
+#### Prefer to keep the stock launcher?
+
+Bind a hardware key to open this app instead, with
+[Key Mapper](https://github.com/keymapperorg/KeyMapper) (FOSS build): trigger on
+the Home key (it reports as **`F1`** here), action *Open app → Astrion Custom*,
+and constrain it to *HaRemote is in foreground* — without that constraint the
+Home key is swallowed everywhere, including inside this app where it is bound to
+your own hotkey.
 
 <img src="examples/screenshots/09-keymapper-rule.png" width="380" alt="Key Mapper rule">
 
-The constraint matters: without it the Home key is swallowed everywhere,
-including inside this app, where it's bound to your own hotkey.
+### 5. Reach system settings without a launcher
 
-### 5. Turn the stock dashboard into a doorway
+With this app as home there is no stock launcher UI, so it carries its own way
+into Android's settings: **swipe down on the status strip**.
 
-Since the stock app is only a gate now, strip its Home Assistant dashboard down
-to a single card telling you what to press:
+<img src="examples/screenshots/12-settings-sheet.png" width="380" alt="Swipe-down settings sheet">
 
-<img src="examples/screenshots/10-stock-landing.png" width="380" alt="Stock landing card">
-
-> The stock app renders **only** its own `custom:aiks-*` card types — a plain
-> `markdown` card makes it show *"View is empty"*. Use an `aiks-scene-card`
-> pointed at a no-op script (a script with an empty `sequence`).
+Configured under `gestures.swipe_down` (see
+[docs/FORK_ADDITIONS.md](docs/FORK_ADDITIONS.md#screen-edge-gestures)). The
+App info row is worth including for any package you may need to Force stop or
+re-Enable later — it is also the way back if a package is ever disabled.
 
 ### 6. Point the app at Home Assistant
 

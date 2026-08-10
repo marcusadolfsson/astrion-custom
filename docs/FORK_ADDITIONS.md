@@ -296,6 +296,29 @@ fetched over the network, and "launch anything" is a much larger surface than
 this needs. The launch is wrapped so a missing Settings activity does nothing
 rather than taking the dashboard down.
 
+### `media_player` transport: scan vs chapter skip
+
+The full-variant card's optional `reverse`/`forward` buttons take an action map
+`{service, entity_id, data}`. Adding **`scan: false`** turns them from
+fast-forward/rewind into **chapter skip** — skip icons rather than scan icons,
+and no scanning state.
+
+```json
+"forward": { "service": "shell_command.chapter_next",
+             "scan": false, "data": { "event": "NEXT" } }
+```
+
+Both halves are needed together. The scanning state exists so the centre button
+shows Play while scanning, because a tap there has to resume normal playback; a
+chapter jump already lands in normal playback, so leaving the flag set would show
+Play over a playing film.
+
+> Useful to know if you drive a Kaleidescape: chapter skip is **not** reachable
+> through `remote.send_command`. Home Assistant's integration whitelists eleven
+> zero-argument commands, and `scan_forward` / `scan_reverse` are fast-forward and
+> rewind, not chapter skip. The real `NEXT` / `PREVIOUS` are top-level protocol
+> commands and need a helper that speaks to the player directly.
+
 ---
 
 ## Voice

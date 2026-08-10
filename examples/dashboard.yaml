@@ -45,16 +45,22 @@ pages:
         options:
           entity_id: media_player.kaleidescape_strato_e
           variant: full
+          # CHAPTER skip, not scan. HA's kaleidescape integration whitelists
+          # only eleven zero-arg commands and chapter skip is not among them,
+          # so scan_forward/scan_reverse are fast-forward and rewind. The real
+          # NEXT/PREVIOUS are top-level protocol commands sent by a helper
+          # script. scan: false gives skip icons and stops the card entering
+          # its scanning state, which would flip the centre button to Play.
           reverse:
-            service: remote.send_command
-            entity_id: remote.kaleidescape_strato_e
+            service: shell_command.kaleidescape_event
+            scan: false
             data:
-              command: scan_reverse
+              event: PREVIOUS
           forward:
-            service: remote.send_command
-            entity_id: remote.kaleidescape_strato_e
+            service: shell_command.kaleidescape_event
+            scan: false
             data:
-              command: scan_forward
+              event: NEXT
   # Voice-search results. The list is exposed as a media_player `source_list`
   # because that is the shape a live, unknown-at-config-time list can take.
   # source_modal rather than source_select: these results ARRIVE, so they present

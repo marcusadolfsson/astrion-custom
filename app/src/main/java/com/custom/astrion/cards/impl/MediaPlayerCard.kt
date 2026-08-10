@@ -9,11 +9,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
@@ -69,8 +69,14 @@ class MediaPlayerCard : CardRenderer {
         val entityId = config.string("entity_id") ?: return
         val full = config.string("variant") == "full"
         val topButtons = (config.options["top_buttons"] as? List<Map<String, Any?>>) ?: emptyList()
-        // Optional reverse/forward transport buttons (e.g. Kaleidescape scan),
-        // each an action map {service, entity_id, data}. Shown only when set.
+        // Optional reverse/forward transport buttons, each an action map
+        // {service, entity_id, data}. Shown only when set.
+        //
+        // `scan: false` makes the pair CHAPTER skip rather than fast-forward /
+        // rewind: skip icons instead of scan icons, and no scanning state --
+        // a chapter jump lands you back in normal playback, so flipping the
+        // centre button to Play (which is right for scanning, where a tap must
+        // resume) would be a lie.
         val reverseBtn = config.options["reverse"] as? Map<String, Any?>
         val forwardBtn = config.options["forward"] as? Map<String, Any?>
         val e = ctx.entities[entityId]
@@ -271,7 +277,11 @@ class MediaPlayerCard : CardRenderer {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 reverseBtn?.let { b ->
-                    CircleControl(Icons.Filled.FastRewind, 70.dp) { scanning = true; fireService(ctx, b) }
+                    val isScan = b["scan"] as? Boolean ?: true
+                    CircleControl(
+                        if (isScan) Icons.Filled.FastRewind else Icons.Filled.SkipPrevious,
+                        70.dp,
+                    ) { if (isScan) scanning = true; fireService(ctx, b) }
                 }
                 CircleControl(
                     if (playing && !scanning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -286,7 +296,11 @@ class MediaPlayerCard : CardRenderer {
                     }
                 }
                 forwardBtn?.let { b ->
-                    CircleControl(Icons.Filled.FastForward, 70.dp) { scanning = true; fireService(ctx, b) }
+                    val isScan = b["scan"] as? Boolean ?: true
+                    CircleControl(
+                        if (isScan) Icons.Filled.FastForward else Icons.Filled.SkipNext,
+                        70.dp,
+                    ) { if (isScan) scanning = true; fireService(ctx, b) }
                 }
             }
         }

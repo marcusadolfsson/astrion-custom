@@ -113,12 +113,6 @@ class MainActivity : ComponentActivity() {
     private val keyRouter = HardwareKeyRouter()
 
     /**
-     * Keys allowed to act without waking the screen. Volume and transport only:
-     * these are the ones used with the remote in your lap during a film, where
-     * lighting the display is the whole annoyance. Navigation and shortcuts are
-     * deliberately excluded -- if you are pressing those, you want to see.
-     */
-    /**
      * How long after the display lights that a keypress still counts as having
      * arrived in the dark. Android's wake and our evdev read race, so the press
      * that woke the screen frequently reaches us a few ms AFTER isInteractive
@@ -126,9 +120,26 @@ class MainActivity : ComponentActivity() {
      */
     private val WAKE_GRACE_MS = 900L
 
+    /**
+     * Keys allowed to act without waking the screen.
+     *
+     * The test is not importance, it is whether the key changes anything ON THIS
+     * DISPLAY. Volume, mute and channel act on the Sonos and the source; the
+     * navigation keys drive the Apple TV or Kaleidescape, whose UI is on the wall
+     * -- you are looking at the TV, not at a 3" screen in your hand, so lighting
+     * it serves nothing and costs battery every press.
+     *
+     * Excluded, deliberately: LIGHT / CURTAIN / SCENE / AC carry `page:` +
+     * `scroll_to:` and move the remote's own view, so a dark screen would hide
+     * the thing they just did. VOICE shows the listening UI. CUSTOM_1..4 and
+     * POWER switch AV activity, which navigates the remote's page by automation.
+     * Those all want the screen up.
+     */
     private val QUIET_KEYS = setOf(
         HardwareKey.VOLUME_UP, HardwareKey.VOLUME_DOWN, HardwareKey.MUTE,
         HardwareKey.PAGE_UP, HardwareKey.PAGE_DOWN,
+        HardwareKey.UP, HardwareKey.DOWN, HardwareKey.LEFT, HardwareKey.RIGHT,
+        HardwareKey.CENTER, HardwareKey.BACK, HardwareKey.HOME, HardwareKey.MENU,
     )
 
     /**

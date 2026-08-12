@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -105,6 +106,9 @@ fun Dashboard(
     bridgeConnected: Boolean = false,
     /** The exact adb command that starts the bridge, apk path resolved. */
     bridgeCommand: String = "",
+    /** Whether the OEM launcher is currently allowed to run. */
+    stockAllowed: Boolean = false,
+    onStockAllowedChange: (Boolean) -> Unit = {},
 ) {
     val connection by connectionState
     val scope = rememberCoroutineScope()
@@ -233,6 +237,8 @@ fun Dashboard(
                 onSync = { onSync(); showSettings = false },
                 bridgeConnected = bridgeConnected,
                 bridgeCommand = bridgeCommand,
+                stockAllowed = stockAllowed,
+                onStockAllowedChange = onStockAllowedChange,
                 onPick = { item ->
                     showSettings = false
                     // Launch from the ACTIVITY and WITHOUT FLAG_ACTIVITY_NEW_TASK,
@@ -444,6 +450,8 @@ private fun SettingsSheet(
     onSync: () -> Unit,
     bridgeConnected: Boolean,
     bridgeCommand: String,
+    stockAllowed: Boolean,
+    onStockAllowedChange: (Boolean) -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     Box(
@@ -507,6 +515,27 @@ private fun SettingsSheet(
             }
 
             Spacer(Modifier.height(4.dp))
+            Text("Stock app", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            ToggleRow(
+                label = if (stockAllowed) "Allowed to run" else "Kept stopped",
+                checked = stockAllowed,
+                enabled = bridgeConnected,
+                onChange = onStockAllowedChange,
+            )
+            Text(
+                if (bridgeConnected) {
+                    "The OEM launcher holds a wake lock the whole time it runs, so the " +
+                        "bridge force-stops it every minute. Allow it if you need it back " +
+                        "-- it stays installed either way and is never disabled."
+                } else {
+                    "Needs the input bridge: force-stopping a package is a shell " +
+                        "privilege, so the app cannot do it on its own."
+                },
+                color = Color(0xFF93AFB6),
+                fontSize = 13.sp,
+            )
+
+            Spacer(Modifier.height(4.dp))
             Text("Astrion Custom", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
             InfoRow("Build", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             InfoRow("Home Assistant", haUrl.ifBlank { "not configured" })
@@ -533,6 +562,32 @@ private fun SheetButton(label: String, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
     )
+}
+
+@Composable
+private fun ToggleRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1E3841))
+            .clickable(enabled = enabled) { onChange(!checked) }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            label,
+            color = if (enabled) Color(0xFFD7E3EA) else Color(0xFF6E8A93),
+            fontSize = 15.sp,
+        )
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+    }
 }
 
 @Composable

@@ -10,7 +10,10 @@ import android.hardware.SensorManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.content.BroadcastReceiver
+import android.content.Intent
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.widget.Toast
@@ -37,9 +40,12 @@ import com.custom.astrion.input.HardwareKey
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import com.custom.astrion.bridge.BridgeClient
 import com.custom.astrion.ha.BatteryReporter
 import com.custom.astrion.input.HardwareKeyRouter
+import com.custom.astrion.input.SleepAdminReceiver
 import com.custom.astrion.ui.Dashboard
 import com.custom.astrion.voice.MicProbe
 import com.custom.astrion.voice.VoiceSession
@@ -95,7 +101,35 @@ class MainActivity : ComponentActivity() {
     }
 
     private lateinit var client: HaClient
+    /** When the display last turned on, for telling a waking press from a normal one. */
+    @Volatile private var screenOnAt = 0L
+
+    private val screenWatcher = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            if (i?.action == Intent.ACTION_SCREEN_ON) screenOnAt = SystemClock.elapsedRealtime()
+        }
+    }
+
     private val keyRouter = HardwareKeyRouter()
+
+    /**
+     * Keys allowed to act without waking the screen. Volume and transport only:
+     * these are the ones used with the remote in your lap during a film, where
+     * lighting the display is the whole annoyance. Navigation and shortcuts are
+     * deliberately excluded -- if you are pressing those, you want to see.
+     */
+    /**
+     * How long after the display lights that a keypress still counts as having
+     * arrived in the dark. Android's wake and our evdev read race, so the press
+     * that woke the screen frequently reaches us a few ms AFTER isInteractive
+     * has already flipped true.
+     */
+    private val WAKE_GRACE_MS = 900L
+
+    private val QUIET_KEYS = setOf(
+        HardwareKey.VOLUME_UP, HardwareKey.VOLUME_DOWN, HardwareKey.MUTE,
+        HardwareKey.PAGE_UP, HardwareKey.PAGE_DOWN,
+    )
 
     /**
      * Screen-off keys. Purely additive: when the bridge is not running (its
@@ -109,6 +143,7 @@ class MainActivity : ComponentActivity() {
      * rather than by two tables kept in step by hand.
      */
     private var bridgeConnected by mutableStateOf(false)
+    private var stockAllowed by mutableStateOf(false)
     /**
      * The remote's battery, published to HA so it can be charted. Nothing else
      * can see it: this is not a HA-managed device, so without this the only
@@ -117,8 +152,65 @@ class MainActivity : ComponentActivity() {
     private val battery by lazy { BatteryReporter(this, client, lifecycleScope) }
 
     private val bridge by lazy {
-        BridgeClient(scope = lifecycleScope) { key ->
+        BridgeClient(
+            scope = lifecycleScope,
+            quietKeys = QUIET_KEYS,
+            isDisplayOff = {
+                // NOT just isInteractive. Android wakes the display on its own
+                // copy of this very keypress, and that can complete before we
+                // sample -- which made the bridge skip the exact press it exists
+                // for. So also treat "the screen came on within the last moment"
+                // as dark: that transition IS this press waking it.
+                val awake = (getSystemService(POWER_SERVICE) as PowerManager).isInteractive
+                val justWoke = (SystemClock.elapsedRealtime() - screenOnAt) < WAKE_GRACE_MS
+                (!awake) || justWoke
+            },
+            onQuietHandled = { sleepScreen() },
+        ) { key ->
             keyRouter.shortHandlerFor(key)?.invoke()
+        }
+    }
+
+    /**
+     * Put the display back down after a keypress that should not have lit it.
+     *
+     * Requires an ACTIVE device admin holding force-lock -- granted once with
+     *   adb shell dpm set-active-admin com.custom.astrion/.input.SleepAdminReceiver
+     * and persistent across reboots, unlike the bridge. Without it lockNow()
+     * throws SecurityException, which is caught: the press still does its job,
+     * the screen just stays lit as it does today.
+     */
+    /**
+     * Whether the OEM launcher is currently allowed to run.
+     *
+     * A flag FILE rather than a message to the bridge, because the bridge is the
+     * thing that may be missing or restarting: a file is read fresh on every
+     * watchdog tick and survives the socket dropping, where an in-band command
+     * would need re-sending on every reconnect.
+     */
+    private val allowStockFile by lazy {
+        java.io.File(createDeviceProtectedStorageContext().dataDir, "allow-stock")
+    }
+
+    private fun readStockAllowed(): Boolean = allowStockFile.exists()
+
+    private fun writeStockAllowed(allow: Boolean) {
+        runCatching {
+            if (allow) {
+                allowStockFile.writeText("1")
+                allowStockFile.setReadable(true, false)
+            } else {
+                allowStockFile.delete()
+            }
+        }
+    }
+
+    private fun sleepScreen() {
+        runCatching {
+            val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val admin = ComponentName(this, SleepAdminReceiver::class.java)
+            if (dpm.isAdminActive(admin)) dpm.lockNow()
+            else Log.d(KEY_TAG, "screen-off keys: device admin not active, leaving display on")
         }
     }
 
@@ -172,7 +264,8 @@ class MainActivity : ComponentActivity() {
                     "# Starts the Astrion input bridge (screen-off keys).\n" +
                     "# Regenerated by the app on every launch -- do not edit.\n" +
                     "CLASSPATH=${applicationInfo.sourceDir} \\\n" +
-                    "  exec app_process /system/bin com.custom.astrion.bridge.InputBridge \"$@\"\n"
+                    "  exec app_process /system/bin com.custom.astrion.bridge.InputBridge \\\n" +
+                    "  --stop=com.aiks.HaRemote \"$@\"\n"
             )
             script.setReadable(true, false)
             script.setExecutable(true, false)
@@ -236,6 +329,7 @@ class MainActivity : ComponentActivity() {
             startSetupServer()
         }
 
+        registerReceiver(screenWatcher, IntentFilter(Intent.ACTION_SCREEN_ON))
         bridge.start()
         battery.start()
         // Poll the client's flag for display only. A StateFlow would be tidier,
@@ -244,6 +338,10 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             while (true) {
                 if (bridgeConnected != bridge.connected) bridgeConnected = bridge.connected
+                // Re-read the flag file rather than trusting our own last write:
+                // the bridge is a separate process and the file is the contract
+                // between them, so the file is the truth.
+                if (stockAllowed != readStockAllowed()) stockAllowed = readStockAllowed()
                 delay(1000)
             }
         }
@@ -272,6 +370,11 @@ class MainActivity : ComponentActivity() {
                 onVoiceDismiss = { voice.dismiss() },
                 bridgeConnected = bridgeConnected,
                 bridgeCommand = bridgeCommand(),
+                stockAllowed = stockAllowed,
+                onStockAllowedChange = { allow ->
+                    writeStockAllowed(allow)
+                    stockAllowed = allow
+                },
             )
         }
     }
@@ -512,6 +615,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        bridge.stop()
+        runCatching { unregisterReceiver(screenWatcher) }
         runCatching { unregisterReceiver(micProbe) }
         stopSetupServer()
         sensorManager?.unregisterListener(motionListener)

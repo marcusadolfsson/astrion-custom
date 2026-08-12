@@ -48,6 +48,9 @@ object InputBridge {
     /** 32-bit ARM: timeval is 2x4 bytes, then u16 type, u16 code, s32 value. */
     private const val EVENT_SIZE = 16
 
+    /** How often to look for packages that should not be running. */
+    private const val WATCHDOG_MS = 60_000L
+
     private val clients = mutableListOf<Socket>()
     private val lock = Object()
 
@@ -55,10 +58,12 @@ object InputBridge {
     fun main(args: Array<String>) {
         val devices = args.filter { it.startsWith("/dev/input/") }
             .ifEmpty { listOf("/dev/input/event1") }
+        val stopPackages = args.filter { it.startsWith("--stop=") }.map { it.removePrefix("--stop=") }
 
-        log("starting; devices=$devices port=$PORT")
+        log("starting; devices=$devices port=$PORT stop=$stopPackages")
 
         devices.forEach { path -> thread(isDaemon = true) { readDevice(path) } }
+        if (stopPackages.isNotEmpty()) thread(isDaemon = true) { watchdog(stopPackages) }
 
         val server = ServerSocket(PORT, 8, InetAddress.getByName("127.0.0.1"))
         log("listening on 127.0.0.1:$PORT")
@@ -69,6 +74,55 @@ object InputBridge {
             log("client connected (${clients.size} total)")
         }
     }
+
+    /**
+     * Kill packages that should not be running, repeatedly.
+     *
+     * The OEM launcher holds a PARTIAL_WAKE_LOCK for as long as it lives, so the
+     * device never deep-sleeps while it is up. Making our app the preferred home
+     * stops it starting AT BOOT, but the firmware relaunches it later by paths we
+     * do not control -- one observed instance held the lock for 23 hours before
+     * anyone noticed. So it has to be killed repeatedly, not once.
+     *
+     * This belongs in the bridge because the bridge is the only part of this
+     * system with the privilege to do it: `am force-stop` needs FORCE_STOP_PACKAGES,
+     * which shell has and an app never will.
+     *
+     * force-stop, deliberately, NOT `pm disable`: disabling the OEM launcher
+     * bricks this hardware into a bootloop that safe mode, recovery and factory
+     * reset cannot reach. A force-stop is transient and the package stays enabled
+     * as a working fallback launcher.
+     */
+    private fun watchdog(packages: List<String>) {
+        // Read fresh each tick: the app toggles this file from its settings
+        // sheet, and a file works whether or not the socket is connected.
+        val gate = java.io.File("/data/user_de/0/com.custom.astrion/allow-stock")
+        while (true) {
+            for (pkg in packages) {
+                if (gate.exists()) {
+                    Thread.sleep(WATCHDOG_MS)
+                    continue
+                }
+                if (isRunning(pkg)) {
+                    runCatching {
+                        Runtime.getRuntime().exec(arrayOf("am", "force-stop", pkg)).waitFor()
+                        log("force-stopped $pkg")
+                    }.onFailure { log("force-stop $pkg failed: ${it.message}") }
+                }
+            }
+            Thread.sleep(WATCHDOG_MS)
+        }
+    }
+
+    /** Scan /proc rather than shelling out to ps -- cheaper, and no parsing. */
+    private fun isRunning(pkg: String): Boolean =
+        java.io.File("/proc").listFiles()
+            ?.any { d ->
+                d.name.toIntOrNull() != null &&
+                    runCatching {
+                        java.io.File(d, "cmdline").readText().trim('\u0000', ' ') == pkg
+                    }.getOrDefault(false)
+            } ?: false
 
     /**
      * One thread per device, blocking on read(). Kept deliberately dumb: no

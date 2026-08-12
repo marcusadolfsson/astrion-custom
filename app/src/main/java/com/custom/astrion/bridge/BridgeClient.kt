@@ -31,6 +31,20 @@ class BridgeClient(
     private val scope: CoroutineScope,
     private val host: String = "127.0.0.1",
     private val port: Int = 8098,
+    /**
+     * Keys that should not light the screen. A press arriving while the display
+     * is dark runs its action and the screen goes straight back down.
+     *
+     * Volume and transport are the cases that matter: adjusting the volume
+     * mid-film should not put a 3" screen in your lap at full brightness for the
+     * whole timeout. Anything NOT in this set behaves normally -- some presses
+     * genuinely want the screen, and guessing wrong in that direction is worse.
+     */
+    private val quietKeys: Set<HardwareKey> = emptySet(),
+    /** Called after a quiet-key action so the caller can re-sleep the display. */
+    private val onQuietHandled: () -> Unit = {},
+    /** True while the display is off; consulted at the moment a key arrives. */
+    private val isDisplayOff: () -> Boolean = { false },
     /** Invoked on the main thread for each key DOWN the bridge reports. */
     private val onKey: (HardwareKey) -> Unit,
 ) {
@@ -38,18 +52,54 @@ class BridgeClient(
     var connected: Boolean = false
         private set
 
+    /**
+     * Held so [stop] can close it. Cancelling the scope is NOT enough: the read
+     * loop is blocked in forEachLine, which no coroutine cancellation can
+     * interrupt, so the socket stays open and the bridge keeps counting a client
+     * that will never act again. Across an activity recreation that accumulates
+     * -- observed as two connected clients for one app.
+     */
+    @Volatile
+    private var socket: Socket? = null
+
+    @Volatile
+    private var started = false
+
     fun start() {
+        // Idempotent: called from onCreate, which can run more than once for a
+        // single process.
+        if (started) return
+        started = true
         scope.launch(Dispatchers.IO) {
             while (isActive) {
                 try {
-                    Socket().use { socket ->
-                        socket.connect(InetSocketAddress(host, port), 1500)
-                        socket.tcpNoDelay = true
+                    Socket().use { sock ->
+                        socket = sock
+                        sock.connect(InetSocketAddress(host, port), 1500)
+                        sock.tcpNoDelay = true
                         connected = true
                         Log.i(TAG, "connected to input bridge on $host:$port")
-                        socket.getInputStream().bufferedReader().forEachLine { line ->
+                        sock.getInputStream().bufferedReader().forEachLine { line ->
                             parse(line)?.let { key ->
-                                scope.launch(Dispatchers.Main) { onKey(key) }
+                                // Sampled HERE, not on the main thread: by the
+                                // time a posted block runs, Android has already
+                                // woken the display for its own copy of this
+                                // event, and the answer would always be "on".
+                                val wasDark = isDisplayOff()
+                                scope.launch(Dispatchers.Main) {
+                                    // ONLY act on presses Android will not
+                                    // deliver itself. With the screen awake it
+                                    // dispatches to dispatchKeyEvent as normal,
+                                    // and this reader sees the SAME press off
+                                    // /dev/input -- so acting here too ran every
+                                    // action twice. The bridge exists purely to
+                                    // cover the press PhoneWindowManager eats to
+                                    // wake the display; anything else is a
+                                    // duplicate.
+                                    if (!wasDark) return@launch
+                                    onKey(key)
+                                    if (key in quietKeys) onQuietHandled()
+                                }
                             }
                         }
                     }
@@ -59,6 +109,7 @@ class BridgeClient(
                     Log.d(TAG, "bridge unavailable: ${e.message}")
                 } finally {
                     connected = false
+                    socket = null
                 }
                 delay(RETRY_MS)
             }
@@ -84,6 +135,13 @@ class BridgeClient(
             return null
         }
         return key
+    }
+
+    /** Close the socket so the bridge drops us; the blocked read then unwinds. */
+    fun stop() {
+        started = false
+        runCatching { socket?.close() }
+        socket = null
     }
 
     companion object {

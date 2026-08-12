@@ -39,6 +39,7 @@ import com.custom.astrion.ha.ServiceCall
 import com.custom.astrion.input.HardwareKey
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
@@ -155,6 +156,8 @@ class MainActivity : ComponentActivity() {
      */
     private var bridgeConnected by mutableStateOf(false)
     private var stockAllowed by mutableStateOf(false)
+    private var stockStops by mutableStateOf(0)
+    private var stockStopAt by mutableStateOf(0L)
     /**
      * The remote's battery, published to HA so it can be charted. Nothing else
      * can see it: this is not a HA-managed device, so without this the only
@@ -205,6 +208,22 @@ class MainActivity : ComponentActivity() {
 
     private fun readStockAllowed(): Boolean = allowStockFile.exists()
 
+    /**
+     * The bridge's force-stop tally: "<count> <lastEpochMs>".
+     *
+     * Read from the file rather than counted here, because the app is not the
+     * thing doing the stopping and is not even running for some of them -- the
+     * bridge outlives an app restart.
+     */
+    private val stopsFile by lazy {
+        java.io.File(createDeviceProtectedStorageContext().dataDir, "stock-stops")
+    }
+
+    private fun readStockStops(): Pair<Int, Long> = runCatching {
+        val parts = stopsFile.readText().trim().split(' ')
+        parts[0].toInt() to (parts.getOrNull(1)?.toLongOrNull() ?: 0L)
+    }.getOrDefault(0 to 0L)
+
     private fun writeStockAllowed(allow: Boolean) {
         runCatching {
             if (allow) {
@@ -213,6 +232,30 @@ class MainActivity : ComponentActivity() {
             } else {
                 allowStockFile.delete()
             }
+        }
+    }
+
+    /**
+     * Publish the force-stop tally to Home Assistant, so how often the OEM
+     * launcher claws its way back can be charted beside the battery it drains.
+     *
+     * total_increasing, not measurement: this is a counter, and that class is
+     * the one that survives it going back to zero (app data cleared, file lost)
+     * without drawing a cliff through the statistics.
+     */
+    private fun postStockStops(count: Int, atMs: Long) {
+        val json = """
+            {"state":"$count",
+             "attributes":{
+               "friendly_name":"Astrion Stock App Stops",
+               "state_class":"total_increasing",
+               "icon":"mdi:close-octagon-outline",
+               "last_stop":"${if (atMs > 0) java.text.SimpleDateFormat(
+                   "yyyy-MM-dd'T'HH:mm:ssZ", java.util.Locale.US).format(java.util.Date(atMs)) else ""}"
+             }}
+        """.trimIndent().replace("\n", "")
+        lifecycleScope.launch(Dispatchers.IO) {
+            client.postJson("/api/states/sensor.astrion_stock_app_stops", json)
         }
     }
 
@@ -353,6 +396,14 @@ class MainActivity : ComponentActivity() {
                 // the bridge is a separate process and the file is the contract
                 // between them, so the file is the truth.
                 if (stockAllowed != readStockAllowed()) stockAllowed = readStockAllowed()
+                val (count, at) = readStockStops()
+                if (count != stockStops) {
+                    stockStops = count
+                    stockStopAt = at
+                    // Only on CHANGE. The count is usually static, and this is a
+                    // once-a-second loop.
+                    postStockStops(count, at)
+                }
                 delay(1000)
             }
         }
@@ -386,6 +437,8 @@ class MainActivity : ComponentActivity() {
                     writeStockAllowed(allow)
                     stockAllowed = allow
                 },
+                stockStops = stockStops,
+                stockStopAt = stockStopAt,
             )
         }
     }

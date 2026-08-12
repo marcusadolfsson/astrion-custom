@@ -54,6 +54,43 @@ object InputBridge {
     private val clients = mutableListOf<Socket>()
     private val lock = Object()
 
+    /**
+     * How many times the OEM launcher has been force-stopped, and when last.
+     *
+     * Recorded because "does it keep coming back, and how often" is a question
+     * about a RATE, and the only honest way to answer it is a running count --
+     * spot checks of `ps` say nothing about what happened overnight. Written to
+     * a file the app reads and republishes to Home Assistant, where it can be
+     * charted next to the battery it explains.
+     */
+    private var stops = 0
+    private var lastStopMs = 0L
+
+    private val stopsFile = java.io.File("/data/user_de/0/com.custom.astrion/stock-stops")
+
+    /**
+     * Survive a bridge restart. The bridge is restarted by hand after every
+     * install, so a counter that reset each time would only ever measure the
+     * current adb session -- useless for the question being asked.
+     */
+    private fun loadStops() {
+        runCatching {
+            val parts = stopsFile.readText().trim().split(' ')
+            stops = parts[0].toInt()
+            lastStopMs = parts.getOrNull(1)?.toLongOrNull() ?: 0L
+        }
+    }
+
+    private fun recordStops() {
+        lastStopMs = System.currentTimeMillis()
+        runCatching {
+            stopsFile.writeText("$stops $lastStopMs")
+            // The bridge runs as root/shell and the app as its own uid, so
+            // without this the app cannot read what we just wrote.
+            stopsFile.setReadable(true, false)
+        }.onFailure { log("could not record stop count: ${it.message}") }
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val devices = args.filter { it.startsWith("/dev/input/") }
@@ -63,7 +100,11 @@ object InputBridge {
         log("starting; devices=$devices port=$PORT stop=$stopPackages")
 
         devices.forEach { path -> thread(isDaemon = true) { readDevice(path) } }
-        if (stopPackages.isNotEmpty()) thread(isDaemon = true) { watchdog(stopPackages) }
+        if (stopPackages.isNotEmpty()) {
+            loadStops()
+            log("watchdog armed; $stops stop(s) recorded so far")
+            thread(isDaemon = true) { watchdog(stopPackages) }
+        }
 
         val server = ServerSocket(PORT, 8, InetAddress.getByName("127.0.0.1"))
         log("listening on 127.0.0.1:$PORT")
@@ -106,7 +147,9 @@ object InputBridge {
                 if (isRunning(pkg)) {
                     runCatching {
                         Runtime.getRuntime().exec(arrayOf("am", "force-stop", pkg)).waitFor()
-                        log("force-stopped $pkg")
+                        stops++
+                        recordStops()
+                        log("force-stopped $pkg (#$stops)")
                     }.onFailure { log("force-stop $pkg failed: ${it.message}") }
                 }
             }

@@ -109,6 +109,9 @@ fun Dashboard(
     /** Whether the OEM launcher is currently allowed to run. */
     stockAllowed: Boolean = false,
     onStockAllowedChange: (Boolean) -> Unit = {},
+    /** How many times the watchdog has force-stopped it, and when last. */
+    stockStops: Int = 0,
+    stockStopAt: Long = 0L,
 ) {
     val connection by connectionState
     val scope = rememberCoroutineScope()
@@ -239,6 +242,8 @@ fun Dashboard(
                 bridgeCommand = bridgeCommand,
                 stockAllowed = stockAllowed,
                 onStockAllowedChange = onStockAllowedChange,
+                stockStops = stockStops,
+                stockStopAt = stockStopAt,
                 onPick = { item ->
                     showSettings = false
                     // Launch from the ACTIVITY and WITHOUT FLAG_ACTIVITY_NEW_TASK,
@@ -452,6 +457,8 @@ private fun SettingsSheet(
     bridgeCommand: String,
     stockAllowed: Boolean,
     onStockAllowedChange: (Boolean) -> Unit,
+    stockStops: Int,
+    stockStopAt: Long,
 ) {
     val clipboard = LocalClipboardManager.current
     Box(
@@ -524,6 +531,23 @@ private fun SettingsSheet(
                 checked = stockAllowed,
                 enabled = bridgeConnected,
                 onChange = onStockAllowedChange,
+            )
+            InfoRow(
+                "Force-stopped",
+                if (stockStops == 0) "never" else buildString {
+                    append(stockStops)
+                    append(if (stockStops == 1) " time" else " times")
+                    if (stockStopAt > 0) {
+                        append(", last ")
+                        append(
+                            android.text.format.DateUtils.getRelativeTimeSpanString(
+                                stockStopAt,
+                                System.currentTimeMillis(),
+                                android.text.format.DateUtils.MINUTE_IN_MILLIS,
+                            )
+                        )
+                    }
+                },
             )
             Text(
                 if (bridgeConnected) {

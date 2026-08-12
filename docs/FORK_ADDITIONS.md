@@ -384,6 +384,54 @@ helper, the same approach Shizuku and Key Mapper take.
   moment debugging costs an adb session.
 - **Resolve the apk path at runtime** when showing the command to a user. It
   changes on every reinstall.
+- **The waking press is a race you can lose.** Do not decide "was the screen
+  off?" by sampling `PowerManager.isInteractive` when the key arrives: Android
+  wakes the display on its own copy of that same press and usually gets there
+  first, so the waking press reads as an ordinary one and gets skipped — the
+  exact press the bridge exists to recover. Track `ACTION_SCREEN_ON` and treat a
+  key within ~900 ms of that transition as having arrived in the dark.
+- **Only act on presses Android will not deliver itself.** With the screen awake
+  it dispatches to `dispatchKeyEvent` as normal *and* the bridge sees the same
+  press off `/dev/input`, so acting on both runs every action twice.
+- **One client per app.** If your activity is HOME and can also be started with
+  `am start`, it lands in a second task as a second instance with a second
+  client, and every dark press fires twice. `launchMode="singleTask"`. Closing
+  the socket is the only way to drop a stale client — cancelling the coroutine
+  scope cannot interrupt a read blocked in `forEachLine`.
+
+### Which keys should skip the wake
+
+A key that acts while the display stays dark is the point of the bridge, but it
+is only right for *some* keys. The test is not how important the key is — it is
+whether the key changes anything **on the remote's own display**.
+
+Volume, mute, channel and the whole navigation cluster (D-pad, BACK, HOME, MENU)
+drive the soundbar and the media player; their UI is on the television, so
+lighting a 3" screen in your hand shows nothing and costs battery every press.
+Keys bound to `page:`/`scroll_to:` move the remote's own view, the voice key
+shows a listening UI, and the activity shortcuts navigate the remote's page by
+automation — those all want the screen up.
+
+## Keeping the OEM launcher stopped
+
+The stock launcher holds a `PARTIAL_WAKE_LOCK` for as long as it runs, so the
+device never deep-sleeps while it is up (one observed hold ran 68 hours). Making
+this app the preferred home stops it starting at boot, but the firmware brings it
+back later by paths outside our control — one instance held the lock for 23 hours
+before anyone noticed. So the bridge force-stops it on a timer, and a toggle in
+the settings sheet turns that off when you want the stock app back.
+
+The watchdog lives in the bridge because the bridge is the only component with
+the privilege: `am force-stop` needs `FORCE_STOP_PACKAGES`, which shell has and
+an app never will. The toggle is a **flag file** the watchdog re-reads each tick
+rather than a command sent over the socket — the bridge is the part that
+restarts, and a file survives that where a message would need re-sending on every
+reconnect.
+
+**force-stop, never `pm disable-user`.** Disabling the OEM launcher bricks this
+hardware into a bootloop that safe mode, recovery and factory reset cannot reach;
+at least one user has needed SP Flash Tool and vendor firmware to recover. A
+force-stop is transient and leaves the package enabled as a working fallback.
 
 ## Battery reported back to Home Assistant
 

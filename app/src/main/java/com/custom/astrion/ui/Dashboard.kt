@@ -517,7 +517,10 @@ private fun SettingsSheet(
             Spacer(Modifier.height(4.dp))
             Text("Stock app", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
             ToggleRow(
-                label = if (stockAllowed) "Allowed to run" else "Kept stopped",
+                // A FIXED label. It read "Allowed to run" / "Kept stopped",
+                // which changed with the switch and left it ambiguous whether
+                // the words described the current state or what tapping would do.
+                label = "Allow stock app to run",
                 checked = stockAllowed,
                 enabled = bridgeConnected,
                 onChange = onStockAllowedChange,

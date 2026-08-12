@@ -428,6 +428,15 @@ rather than a command sent over the socket — the bridge is the part that
 restarts, and a file survives that where a message would need re-sending on every
 reconnect.
 
+The watchdog also keeps a running **tally** of how many times it has had to act,
+which the app republishes as a `total_increasing` counter. Worth having because
+"does it keep coming back?" is a question about a rate, and `ps` says nothing
+about what happened overnight. The count lives in a file, not in either process's
+memory: the bridge is restarted by hand after every install and the app restarts
+on its own, so a counter held by either would only measure the current session.
+The bridge runs as shell and the app as its own uid — the file needs
+`setReadable(true, false)` or the app cannot read what was just written to it.
+
 **force-stop, never `pm disable-user`.** Disabling the OEM launcher bricks this
 hardware into a bootloop that safe mode, recovery and factory reset cannot reach;
 at least one user has needed SP Flash Tool and vendor firmware to recover. A

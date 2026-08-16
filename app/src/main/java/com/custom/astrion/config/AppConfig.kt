@@ -161,4 +161,18 @@ data class HotkeyConfig(
     val scrollTo: String? = null,
     /** Built-in app action, currently just "sync" (re-pull the dashboard from HA). */
     val action: String? = null,
+    /**
+     * Whether this key may act with the screen OFF, without lighting it.
+     *
+     * Tri-state on purpose. `null` = "not stated", so the app's built-in
+     * QUIET_KEYS default decides; `true`/`false` override it in either direction.
+     * A plain Boolean would have made every unstated key an explicit `false` and
+     * silently disabled the defaults the moment a layout listed one hotkey.
+     *
+     * This has to be per-layout rather than a constant because the HA100A and
+     * HA100B remotes print different legends on the SAME keycodes: LIGHT is a
+     * page jump on the A unit (wants the screen up) and SCAN on the B units
+     * (wants it left dark). See astrion/dashboard.b.yaml.
+     */
+    val quiet: Boolean? = null,
 )

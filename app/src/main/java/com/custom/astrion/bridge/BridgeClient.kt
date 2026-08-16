@@ -39,8 +39,13 @@ class BridgeClient(
      * mid-film should not put a 3" screen in your lap at full brightness for the
      * whole timeout. Anything NOT in this set behaves normally -- some presses
      * genuinely want the screen, and guessing wrong in that direction is worse.
+     *
+     * A function, not a Set, because the set now depends on the dashboard, which
+     * is re-read on every onResume: this client is constructed once and would
+     * otherwise hold whatever was configured at first launch, so a Sync that
+     * changed a `quiet` flag would appear to do nothing until a restart.
      */
-    private val quietKeys: Set<HardwareKey> = emptySet(),
+    private val quietKeys: () -> Set<HardwareKey> = { emptySet() },
     /** Called after a quiet-key action so the caller can re-sleep the display. */
     private val onQuietHandled: () -> Unit = {},
     /** True while the display is off; consulted at the moment a key arrives. */
@@ -98,7 +103,7 @@ class BridgeClient(
                                     // duplicate.
                                     if (!wasDark) return@launch
                                     onKey(key)
-                                    if (key in quietKeys) onQuietHandled()
+                                    if (key in quietKeys()) onQuietHandled()
                                 }
                             }
                         }

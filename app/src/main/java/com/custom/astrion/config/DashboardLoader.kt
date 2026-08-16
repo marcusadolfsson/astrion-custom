@@ -186,7 +186,10 @@ object DashboardLoader {
             ?: emptyMap()
         val scrollTo = (obj["scroll_to"] as? JsonPrimitive)?.content
         val action = (obj["action"] as? JsonPrimitive)?.content
-        return HotkeyConfig(key, page, service, entityId, data, scrollTo, action)
+        // Absent stays null (= "use the built-in default"), so listing one quiet
+        // key in a layout does not implicitly un-quiet every other key.
+        val quiet = (obj["quiet"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
+        return HotkeyConfig(key, page, service, entityId, data, scrollTo, action, quiet)
     }
 
     // ---- serialize defaults -------------------------------------------------
@@ -255,6 +258,7 @@ object DashboardLoader {
                 if (hk.data.isNotEmpty()) put("data", JsonPlain.toJson(hk.data))
                 hk.scrollTo?.let { put("scroll_to", it) }
                 hk.action?.let { put("action", it) }
+                hk.quiet?.let { put("quiet", it) }
             })
         }
     }

@@ -130,18 +130,45 @@ class MainActivity : ComponentActivity() {
      * -- you are looking at the TV, not at a 3" screen in your hand, so lighting
      * it serves nothing and costs battery every press.
      *
-     * Excluded, deliberately: LIGHT / CURTAIN / SCENE / AC carry `page:` +
+     * Excluded by default: LIGHT / CURTAIN / SCENE / AC carry `page:` +
      * `scroll_to:` and move the remote's own view, so a dark screen would hide
      * the thing they just did. VOICE shows the listening UI. CUSTOM_1..4 and
      * POWER switch AV activity, which navigates the remote's page by automation.
      * Those all want the screen up.
+     *
+     * These are DEFAULTS, not the final answer: a layout may set `quiet` on any
+     * hotkey to override its entry here. That exists because the same keycode
+     * means different things on different hardware -- 134 is LIGHT (a page jump,
+     * screen up) on the HA100A and SCAN (transport, screen stays dark) on the
+     * HA100B, which print different legends on identical buttons. Encoding that
+     * as a constant would have forced one behaviour onto both remotes.
      */
-    private val QUIET_KEYS = setOf(
+    private val DEFAULT_QUIET_KEYS = setOf(
         HardwareKey.VOLUME_UP, HardwareKey.VOLUME_DOWN, HardwareKey.MUTE,
         HardwareKey.PAGE_UP, HardwareKey.PAGE_DOWN,
         HardwareKey.UP, HardwareKey.DOWN, HardwareKey.LEFT, HardwareKey.RIGHT,
         HardwareKey.CENTER, HardwareKey.BACK, HardwareKey.HOME, HardwareKey.MENU,
     )
+
+    /**
+     * Effective quiet set: the defaults above, plus every hotkey that asked to be
+     * quiet, minus every hotkey that asked not to be.
+     *
+     * Recomputed from the live config rather than captured once, because the
+     * dashboard is re-read in onResume() and a Sync must be able to change this
+     * without a reinstall -- the whole point of moving it out of a constant.
+     */
+    private fun quietKeys(): Set<HardwareKey> {
+        val hotkeys = dashboard.config.hotkeys + dashboard.config.longHotkeys
+        val stated = hotkeys.mapNotNull { hk ->
+            val q = hk.quiet ?: return@mapNotNull null
+            val key = runCatching { HardwareKey.valueOf(hk.key.uppercase()) }.getOrNull()
+                ?: return@mapNotNull null
+            key to q
+        }
+        return DEFAULT_QUIET_KEYS + stated.filter { it.second }.map { it.first } -
+            stated.filterNot { it.second }.map { it.first }.toSet()
+    }
 
     /**
      * Screen-off keys. Purely additive: when the bridge is not running (its
@@ -168,7 +195,7 @@ class MainActivity : ComponentActivity() {
     private val bridge by lazy {
         BridgeClient(
             scope = lifecycleScope,
-            quietKeys = QUIET_KEYS,
+            quietKeys = ::quietKeys,
             isDisplayOff = {
                 // NOT just isInteractive. Android wakes the display on its own
                 // copy of this very keypress, and that can complete before we

@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.custom.astrion.ui.AstrionTheme
 import com.custom.astrion.config.ConfigServer
 import com.custom.astrion.config.ConnectionConfig
 import com.custom.astrion.config.DashboardConfig
@@ -569,41 +570,43 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(entities) {
                 snapshotFlow { entities.value }.collect { followPageEntity(it) }
             }
-            Dashboard(
-                client = client,
-                entitiesState = entities,
-                connectionState = connection,
-                config = dashboard.config,
-                configNotice = dashboard.notice,
-                navTarget = navTarget,
-                onNavHandled = { navTarget = null },
-                scrollTarget = scrollTarget,
-                onScrollHandled = { scrollTarget = null },
-                openTarget = openTarget,
-                onOpenHandled = { openTarget = null },
-                onSync = { syncFromHa(manual = true) },
-                haUrl = haUrl,
-                setupUrl = setupUrl,
-                onSetup = { if (setupUrl == null) startSetupServer() else stopSetupServer() },
-                voiceState = voiceState.value,
-                onVoiceDismiss = { voice.dismiss() },
-                onPageChange = { i -> onPagerSettled(i) },
-                deviceName = deviceName,
-                settingsOpen = settingsOpen,
-                onSettingsOpen = { settingsOpen = it; if (it) refreshAdbStatus() },
-                adbStatus = adbStatus,
-                statusOpen = statusOpen,
-                onStatusOpen = { statusOpen = it },
-                bridgeConnected = bridgeConnected,
-                bridgeCommand = bridgeCommand(),
-                stockAllowed = stockAllowed,
-                onStockAllowedChange = { allow ->
-                    writeStockAllowed(allow)
-                    stockAllowed = allow
-                },
-                stockStops = stockStops,
-                stockStopAt = stockStopAt,
-            )
+            AstrionTheme {
+                Dashboard(
+                    client = client,
+                    entitiesState = entities,
+                    connectionState = connection,
+                    config = dashboard.config,
+                    configNotice = dashboard.notice,
+                    navTarget = navTarget,
+                    onNavHandled = { navTarget = null },
+                    scrollTarget = scrollTarget,
+                    onScrollHandled = { scrollTarget = null },
+                    openTarget = openTarget,
+                    onOpenHandled = { openTarget = null },
+                    onSync = { syncFromHa(manual = true) },
+                    haUrl = haUrl,
+                    setupUrl = setupUrl,
+                    onSetup = { if (setupUrl == null) startSetupServer() else stopSetupServer() },
+                    voiceState = voiceState.value,
+                    onVoiceDismiss = { voice.dismiss() },
+                    onPageChange = { i -> onPagerSettled(i) },
+                    deviceName = deviceName,
+                    settingsOpen = settingsOpen,
+                    onSettingsOpen = { settingsOpen = it; if (it) refreshAdbStatus() },
+                    adbStatus = adbStatus,
+                    statusOpen = statusOpen,
+                    onStatusOpen = { statusOpen = it },
+                    bridgeConnected = bridgeConnected,
+                    bridgeCommand = bridgeCommand(),
+                    stockAllowed = stockAllowed,
+                    onStockAllowedChange = { allow ->
+                        writeStockAllowed(allow)
+                        stockAllowed = allow
+                    },
+                    stockStops = stockStops,
+                    stockStopAt = stockStopAt,
+                )
+            }
         }
     }
 

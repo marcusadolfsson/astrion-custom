@@ -96,6 +96,15 @@ class BubbleClimateCard : CardRenderer {
          * thermostat on eco+, where clear-hold legitimately does nothing).
          */
         const val RESUME_OPTIMISTIC_MS = 12_000L
+
+        /**
+         * Width of the two flanking slots in the picker row.
+         *
+         * Equal to StepBtn's diameter on purpose: the mode button on the left and
+         * the +/- column on the right have to occupy the SAME width or the wheel
+         * between them is not on the dialog's centre line.
+         */
+        val SIDE_SLOT = 52.dp
     }
 
     @Composable
@@ -374,39 +383,7 @@ class BubbleClimateCard : CardRenderer {
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                // Mode lives behind its own icon, collapsed by default.
-                //
-                // Heat/Cool/Auto gets changed perhaps twice a year, while the
-                // setpoint gets changed daily -- so a permanent four-button row
-                // spent the top of the dialog, and a third of its height, on the
-                // rarest decision here. The icon still SHOWS the current mode, so
-                // nothing is hidden: only the ability to change it costs a tap.
-                // Top RIGHT, and unlabelled. The icon already names the mode --
-                // a snowflake beside the word "Cool" says it twice, and the label
-                // was the widest thing in the header for the least-used control.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(if (modeOpen) accent else Color(0xFF1E3841))
-                            .clickable { modeOpen = !modeOpen },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            modeIcon(mode),
-                            contentDescription = "Mode",
-                            tint = if (modeOpen) Color.White else accent,
-                            modifier = Modifier.size(21.dp),
-                        )
-                    }
-                }
-
                 if (modeOpen) {
-                    Spacer(Modifier.height(10.dp))
                     // Only the modes this thermostat actually advertises --
                     // rendering a button the device would reject is worse than
                     // not offering it.
@@ -422,8 +399,8 @@ class BubbleClimateCard : CardRenderer {
                             }
                         }
                     }
+                    Spacer(Modifier.height(12.dp))
                 }
-                Spacer(Modifier.height(12.dp))
 
                 if (isAuto) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -442,14 +419,27 @@ class BubbleClimateCard : CardRenderer {
                 if (mode == "off" || editing == null) {
                     // Nothing sensible to scroll to. Saying so is better than a
                     // wheel that commits a setpoint to a system that is off.
-                    Text(
-                        if (mode == "off") "System is off" else "No setpoint",
-                        color = Color(0xFF93AFB6),
-                        fontSize = 16.sp,
-                        modifier = Modifier.padding(vertical = 22.dp),
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ModeSlot(mode, modeOpen, accent) { modeOpen = !modeOpen }
+                        Text(
+                            if (mode == "off") "System is off" else "No setpoint",
+                            color = Color(0xFF93AFB6),
+                            fontSize = 16.sp,
+                            modifier = Modifier.padding(vertical = 22.dp, horizontal = 12.dp),
+                        )
+                        Spacer(Modifier.width(SIDE_SLOT))
+                    }
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // The mode button sits INLINE, in a slot the same width
+                        // as the +/- column opposite it, rather than alone in the
+                        // dialog's top-right corner. Two reasons: a lone corner
+                        // button spends a whole line on the least-used control,
+                        // and with steppers on one side only, the wheel -- the
+                        // thing the eye actually goes to -- sat off-centre by half
+                        // their width. Matching slots put it back on the middle.
+                        ModeSlot(mode, modeOpen, accent) { modeOpen = !modeOpen }
+                        Spacer(Modifier.width(12.dp))
                         Wheel(
                             // Keyed on MODE as well as bound. Heat and Cool store
                             // separate setpoints, so switching between them has to
@@ -503,6 +493,39 @@ class BubbleClimateCard : CardRenderer {
         "heat_cool" -> Icons.Filled.SwapVert
         "off" -> Icons.Filled.PowerSettingsNew
         else -> Icons.Filled.Thermostat
+    }
+
+    /**
+     * The mode toggle, in a fixed-width slot that mirrors the stepper column.
+     *
+     * The button itself is smaller than the slot -- it is a secondary control and
+     * should not compete with the +/- circles -- so the slot centres it. Only the
+     * SLOT's width matters for the layout; the button's does not.
+     */
+    @Composable
+    private fun ModeSlot(mode: String, open: Boolean, accent: Color, onClick: () -> Unit) {
+        Box(
+            modifier = Modifier.width(SIDE_SLOT),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(if (open) accent else Color(0xFF1E3841))
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                // Unlabelled: the icon already names the mode, and a snowflake
+                // beside the word "Cool" says it twice.
+                Icon(
+                    modeIcon(mode),
+                    contentDescription = "Mode",
+                    tint = if (open) Color.White else accent,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+        }
     }
 
     /** Small selectable pill, used for both the mode row and the bound toggle. */

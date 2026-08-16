@@ -149,7 +149,7 @@ class ConfigServer(
         ${if (error.isNotBlank()) "<div class=\"err\">$error</div>" else ""}
         <form method="POST" action="/submit">
           <label>Home Assistant URL</label>
-          <input name="url" placeholder="http://10.10.10.221:8123" autocapitalize="off" autocorrect="off">
+          <input name="url" placeholder="http://homeassistant.local:8123" autocapitalize="off" autocorrect="off">
           <label>Long-lived access token</label>
           <input name="token" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." autocapitalize="off" autocorrect="off">
           <label>Device name (optional)</label>

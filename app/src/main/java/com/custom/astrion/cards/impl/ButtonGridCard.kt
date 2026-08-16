@@ -6,6 +6,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import com.custom.astrion.ui.ackColor
+import com.custom.astrion.ui.pressFeedback
+import com.custom.astrion.ui.rememberPressFeedback
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -131,15 +134,20 @@ class ButtonGridCard : CardRenderer {
         val bg = if (active) Color(0xFF2E7D95) else Color(0xFF2A4954)
         val fg = if (active) Color.White else Color(0xFFE6F0F1)
 
+        // Same latched feedback as the shade buttons. It matters here too: the
+        // Lutron scene buttons and the bed presets both take a moment to report
+        // back, and `active` only lights up once the tracker catches up.
+        val (press, click) = rememberPressFeedback(onClick)
+
         var box = modifier
             .height(height)
             .clip(RoundedCornerShape(14.dp))
-            .background(bg)
+            .background(ackColor(bg, press))
         if (active) box = box.border(2.dp, Color(0xFF7FD8F0), RoundedCornerShape(14.dp))
 
         Column(
             modifier = box
-                .clickable(onClick = onClick)
+                .pressFeedback(press, click)
                 .padding(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,

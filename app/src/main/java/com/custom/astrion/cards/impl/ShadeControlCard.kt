@@ -2,6 +2,9 @@ package com.custom.astrion.cards.impl
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import com.custom.astrion.ui.ackColor
+import com.custom.astrion.ui.pressFeedback
+import com.custom.astrion.ui.rememberPressFeedback
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -154,12 +157,17 @@ class ShadeControlCard : CardRenderer {
 
     @Composable
     private fun RoundButton(icon: ImageVector, onClick: () -> Unit) {
+        // Latched tap feedback rather than a ripple. These three buttons are the
+        // clearest case for it in the whole dashboard: Bond is RF one-way, so
+        // nothing on screen changes for 5-10 s after a press, and a 200 ms
+        // ripple on a 3" panel is why the same button gets pressed three times.
+        val (press, click) = rememberPressFeedback(onClick)
         Box(
             modifier = Modifier
                 .size(46.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF2E7D95))
-                .clickable(onClick = onClick),
+                .background(ackColor(Color(0xFF2E7D95), press))
+                .pressFeedback(press, click),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = Color.White)

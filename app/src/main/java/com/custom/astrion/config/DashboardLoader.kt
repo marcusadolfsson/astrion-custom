@@ -110,7 +110,19 @@ object DashboardLoader {
                     val obj = p as? JsonObject ?: error("each page must be an object")
                     val name = (obj["name"] as? JsonPrimitive)?.content ?: "Page"
                     val cards = (obj["cards"] as? JsonArray)?.map { parseCard(it as JsonObject) } ?: emptyList()
-                    PageConfig(name, cards)
+                    PageConfig(
+                        name = name,
+                        cards = cards,
+                        // parseHotkey is reused verbatim, so a page-scoped binding
+                        // supports `quiet` for free.
+                        hotkeys = (obj["hotkeys"] as? JsonArray)
+                            ?.map { parseHotkey(it as JsonObject) } ?: emptyList(),
+                        longHotkeys = (obj["longHotkeys"] as? JsonArray)
+                            ?.map { parseHotkey(it as JsonObject) } ?: emptyList(),
+                        voice = (obj["voice"] as? JsonObject)?.let { v ->
+                            PageVoiceConfig(path = (v["path"] as? JsonPrimitive)?.content)
+                        },
+                    )
                 }
                 if (pages.isEmpty()) error("\"pages\" is empty")
                 val start = (root["startPage"] as? JsonPrimitive)?.intOrNull ?: 0
@@ -161,7 +173,18 @@ object DashboardLoader {
                         suggestState = (v["suggest_state"] as? JsonPrimitive)?.content,
                     )
                 }
-                AppConfig(pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys, overlay, voice, gestures)
+                val status = (root["status"] as? JsonObject)?.let { s ->
+                    StatusConfig(
+                        title = (s["title"] as? JsonPrimitive)?.content ?: "Status",
+                        cards = (s["cards"] as? JsonArray)?.map { parseCard(it as JsonObject) }
+                            ?: emptyList(),
+                    )
+                }
+                val pageEntity = (root["page_entity"] as? JsonPrimitive)?.content
+                AppConfig(
+                    pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys,
+                    overlay, voice, gestures, status, pageEntity,
+                )
             }
             else -> error("top level must be an object or array")
         }
@@ -218,9 +241,32 @@ object DashboardLoader {
                             })
                         }
                     })
+                    // Emitted only when present, so a layout with no page-scoped
+                    // overrides still writes byte-identically to before.
+                    if (page.hotkeys.isNotEmpty()) put("hotkeys", encodeHotkeys(page.hotkeys))
+                    if (page.longHotkeys.isNotEmpty()) {
+                        put("longHotkeys", encodeHotkeys(page.longHotkeys))
+                    }
+                    page.voice?.path?.let { p ->
+                        put("voice", buildJsonObject { put("path", p) })
+                    }
                 })
             }
         })
+        cfg.status?.let { s ->
+            put("status", buildJsonObject {
+                put("title", s.title)
+                put("cards", buildJsonArray {
+                    s.cards.forEach { card ->
+                        add(buildJsonObject {
+                            put("type", card.type)
+                            put("options", JsonPlain.toJson(card.options))
+                        })
+                    }
+                })
+            })
+        }
+        cfg.pageEntity?.let { put("page_entity", it) }
         cfg.overlay?.let { o ->
             put("overlay", buildJsonObject {
                 o.volumeEntity?.let { put("volume_entity", it) }

@@ -90,8 +90,12 @@ class ConfigServer(
             val form = parseForm(body)
             val url = form["url"]?.trim().orEmpty().removeSuffix("/")
             val token = form["token"]?.trim().orEmpty()
+            // Optional: only the URL and token are needed to RUN. A blank device
+            // just means this remote publishes no per-device helpers.
+            val device = form["device"]?.trim().orEmpty()
+                .lowercase().replace(Regex("[^a-z0-9_]+"), "_").trim('_')
             if (url.isNotBlank() && token.isNotBlank()) {
-                onSaved(ConnectionConfig.Connection(url, token))
+                onSaved(ConnectionConfig.Connection(url, token, device))
                 respond(out, page(saved = true, url = url))
                 return
             }
@@ -145,9 +149,11 @@ class ConfigServer(
         ${if (error.isNotBlank()) "<div class=\"err\">$error</div>" else ""}
         <form method="POST" action="/submit">
           <label>Home Assistant URL</label>
-          <input name="url" placeholder="http://homeassistant.local:8123" autocapitalize="off" autocorrect="off">
+          <input name="url" placeholder="http://10.10.10.221:8123" autocapitalize="off" autocorrect="off">
           <label>Long-lived access token</label>
           <input name="token" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." autocapitalize="off" autocorrect="off">
+          <label>Device name (optional)</label>
+          <input name="device" placeholder="living / master_1 / master_2" autocapitalize="off" autocorrect="off">
           <button type="submit">Save</button>
         </form>
         </div></body></html>

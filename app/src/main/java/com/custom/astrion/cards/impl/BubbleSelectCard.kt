@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Blinds
 import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KingBed
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.SettingsRemote
@@ -157,6 +158,7 @@ object CardIcons {
         "curtain", "shade", "shades", "blinds" -> Icons.Filled.Blinds
         "thermostat", "climate", "ac", "temp" -> Icons.Filled.Thermostat
         "remote" -> Icons.Filled.SettingsRemote
+        "bed", "sleep", "position" -> Icons.Filled.KingBed
         else -> Icons.Filled.Tune
     }
 }

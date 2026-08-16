@@ -22,6 +22,30 @@ data class AppConfig(
     val voice: VoiceConfig? = null,
     /** Optional screen-edge gestures; absent means they do nothing. */
     val gestures: GesturesConfig? = null,
+    /**
+     * Diagnostics shown by the swipe-up panel's Status row, off the pager.
+     *
+     * These readouts are reference material you go LOOKING for -- they answer
+     * "what is the chain actually doing right now" -- so they do not earn a
+     * permanent dot next to the rooms you use daily. Absent means the panel
+     * simply shows no Status row.
+     */
+    val status: StatusConfig? = null,
+    /**
+     * An input_select whose options are page names, mirrored both ways: HA
+     * writing it navigates the remote, and swiping the remote writes it back.
+     *
+     * Per REMOTE, not per layout -- it belongs in that remote's override file.
+     * Absent means the remote neither follows nor reports, which is the correct
+     * behaviour for a device with no helper of its own.
+     */
+    val pageEntity: String? = null,
+)
+
+/** The full-screen Status view: a title and the same cards any page can hold. */
+data class StatusConfig(
+    val title: String = "Status",
+    val cards: List<CardConfig> = emptyList(),
 )
 
 /**
@@ -133,11 +157,45 @@ data class OverlayConfig(
     val condition: CardConfig? = null,
 )
 
-/** One swipeable page: a name (used by hotkey `page` navigation) and its cards. */
+/**
+ * One swipeable page: a name (used by hotkey `page` navigation) and its cards.
+ *
+ * A page may also carry its own hotkey bindings and VOICE target, which is what
+ * makes the visible page the ROOM CONTEXT: swipe to the bedroom and the D-pad
+ * drives the bedroom's Apple TV, because the keys resolve against this page
+ * first. Resolution is per KEY -- a page overrides only the keys it names and
+ * inherits the rest -- so a room page does not have to restate POWER, VOICE,
+ * MENU and the four CUSTOM keys just to change the four it cares about.
+ *
+ * To make a key do NOTHING on a page, list it with no action (`- key: LIGHT`):
+ * it resolves, is handled, and falls through to nothing.
+ */
 data class PageConfig(
     val name: String,
     val cards: List<CardConfig>,
+    /** Page-scoped short-press bindings; override the global list per key. */
+    val hotkeys: List<HotkeyConfig> = emptyList(),
+    /** Page-scoped long-press bindings; override the global list per key. */
+    val longHotkeys: List<HotkeyConfig> = emptyList(),
+    /** Page-scoped VOICE overrides; unset fields inherit the global `voice:`. */
+    val voice: PageVoiceConfig? = null,
 )
+
+/**
+ * Partial override of [VoiceConfig]. Every field nullable = "not stated", the
+ * same tri-state discipline as HotkeyConfig.quiet -- so a page that only wants a
+ * different Apple TV does not silently blank the global prompts and timings.
+ */
+data class PageVoiceConfig(
+    val path: String? = null,
+)
+
+/** Global voice config with a page's partial override applied over it. */
+fun VoiceConfig?.mergedWith(o: PageVoiceConfig?): VoiceConfig? = when {
+    o == null -> this
+    this == null -> VoiceConfig(path = o.path ?: VoiceConfig().path)
+    else -> copy(path = o.path ?: path)
+}
 
 /**
  * One physical-button binding. `key` is a HardwareKey name — the HA100 has:

@@ -37,10 +37,20 @@ object EntityRefs {
             // and the condition evaluates against a null state forever.
             o.condition?.let { walk(it.options, out) }
         }
-        (config.hotkeys + config.longHotkeys).forEach { hk ->
+        // Page-scoped hotkeys too, not just the global list: a binding that only
+        // exists on one page still names an entity, and missing it leaves that
+        // card permanently blank (see the over-collect bias noted above).
+        val allHotkeys = config.hotkeys + config.longHotkeys +
+            config.pages.flatMap { it.hotkeys + it.longHotkeys }
+        allHotkeys.forEach { hk ->
             hk.entityId?.let { if (ENTITY_ID.matches(it)) out.add(it) }
             walk(hk.data, out)
         }
+        // The page-control entity is written AND read by the app; without it here
+        // the app would never see HA's page changes.
+        config.pageEntity?.let { if (ENTITY_ID.matches(it)) out.add(it) }
+        // Status view cards are off the pager but still subscribe like any others.
+        config.status?.cards?.forEach { walk(it.options, out) }
         return out
     }
 

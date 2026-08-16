@@ -24,8 +24,15 @@ object ConnectionConfig {
     private const val PREFS = "astrion_connection"
     private const val KEY_URL = "url"
     private const val KEY_TOKEN = "token"
+    private const val KEY_DEVICE = "device"
 
-    data class Connection(val url: String, val token: String) {
+    /**
+     * @param device short slug naming THIS remote (e.g. "living", "master_1").
+     *   Names the per-remote helper entities so three remotes stop overwriting
+     *   one shared sensor. Blank is tolerated -- the app still runs, it just
+     *   publishes nothing rather than publishing into a collision.
+     */
+    data class Connection(val url: String, val token: String, val device: String = "") {
         val isComplete: Boolean get() = url.isNotBlank() && token.isNotBlank()
     }
 
@@ -35,6 +42,7 @@ object ConnectionConfig {
         val stored = Connection(
             prefs.getString(KEY_URL, "").orEmpty(),
             prefs.getString(KEY_TOKEN, "").orEmpty(),
+            prefs.getString(KEY_DEVICE, "").orEmpty(),
         )
         if (stored.isComplete) return stored
         return Connection(BuildConfig.HA_URL, BuildConfig.HA_TOKEN)
@@ -45,6 +53,7 @@ object ConnectionConfig {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_URL, conn.url)
             .putString(KEY_TOKEN, conn.token)
+            .putString(KEY_DEVICE, conn.device)
             .apply()
     }
 }

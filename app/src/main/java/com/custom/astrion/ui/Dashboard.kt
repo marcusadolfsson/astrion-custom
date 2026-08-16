@@ -1,5 +1,6 @@
 package com.custom.astrion.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -55,6 +56,7 @@ import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRegistry
 import com.custom.astrion.cards.impl.ConditionalCard
 import com.custom.astrion.config.AppConfig
+import com.custom.astrion.config.mergedWith
 import com.custom.astrion.config.OverlayConfig
 import com.custom.astrion.voice.VoiceOverlay
 import com.custom.astrion.voice.VoiceState
@@ -94,10 +96,22 @@ fun Dashboard(
     /** Voice indicator state; the VOICE key drives it via VoiceSession. */
     voiceState: VoiceState = VoiceState.Idle,
     onVoiceDismiss: () -> Unit = {},
+    /** The page the pager has SETTLED on; MainActivity uses it to scope hotkeys. */
+    onPageChange: (Int) -> Unit = {},
+    /** Swipe-up panel visibility, owned by MainActivity (see the note below). */
+    settingsOpen: Boolean = false,
+    onSettingsOpen: (Boolean) -> Unit = {},
+    /** Full-screen Status view visibility, likewise owned by MainActivity. */
+    statusOpen: Boolean = false,
+    onStatusOpen: (Boolean) -> Unit = {},
     /** Invoked when the user taps Sync in the swipe-up info panel. */
     onSync: () -> Unit = {},
     /** Live HA base URL (from ConnectionConfig, not BuildConfig) for the info panel. */
     haUrl: String = "",
+    /** This remote's configured name, shown in the info panel. */
+    deviceName: String = "",
+    /** Network-adb state for the info panel; computed by MainActivity. */
+    adbStatus: String = "",
     /** Non-null while the setup web server is listening (its browsable URL). */
     setupUrl: String? = null,
     /** Toggles the setup web server from the info panel. */
@@ -164,7 +178,31 @@ fun Dashboard(
         onNavHandled()
     }
 
-    var showSettings by remember { mutableStateOf(false) }
+    // settledPage, NOT currentPage: currentPage flips the moment a drag crosses
+    // the snap threshold, so a half-swipe that springs back would momentarily
+    // repoint the physical keys at another room -- a volume press landing on the
+    // wrong speaker because a thumb wobbled. rememberUpdatedState so the
+    // collector is not restarted by every recomposition handing it a fresh
+    // lambda (the same idiom as openTargetState below).
+    val onPageChangeState = rememberUpdatedState(onPageChange)
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }.collect { onPageChangeState.value(it) }
+    }
+
+    // Overlay visibility is HOISTED to MainActivity, not remembered here.
+    //
+    // It has to be: dispatchKeyEvent resolves BACK against the key router BEFORE
+    // Android ever calls onBackPressed(), and BACK *is* bound (to the AV back
+    // action), so it is consumed there and a BackHandler in this composable
+    // would never run -- BACK would navigate the Apple TV while a sheet sat open
+    // on the remote. The activity needs to know an overlay is up to intercept it.
+    val showSettings = settingsOpen
+    val showStatus = statusOpen
+
+    // Still registered, for the case where BACK is NOT bound as a hotkey: then
+    // dispatchKeyEvent falls through to super and this is what closes the sheet.
+    BackHandler(enabled = showStatus) { onStatusOpen(false) }
+    BackHandler(enabled = showSettings && !showStatus) { onSettingsOpen(false) }
 
     // Nothing to show until the app knows which HA to talk to: on a fresh
     // install, put the setup server's address + port on screen so it can be
@@ -182,7 +220,7 @@ fun Dashboard(
         Column(modifier = Modifier.fillMaxSize()) {
             // Above the banners on purpose: the clock and battery should hold
             // the same spot whether or not a connection banner is showing.
-            StatusBar(onSwipeDown = config.gestures?.swipeDown?.let { { showSettings = true } })
+            StatusBar(onSwipeDown = config.gestures?.swipeDown?.let { { onSettingsOpen(true) } })
             ConnectionBanner(connection)
             if (configNotice != null) ConfigNoticeBanner(configNotice)
 
@@ -206,7 +244,7 @@ fun Dashboard(
                 pages = config.pages,
                 current = pagerState.currentPage,
                 onDotClick = { i -> scope.launch { pagerState.animateScrollToPage(i) } },
-                onSwipeUp = { showSettings = true },
+                onSwipeUp = { onSettingsOpen(true) },
             )
         }
 
@@ -216,7 +254,11 @@ fun Dashboard(
         // (movie searches in front of the Kaleidescape, nothing elsewhere). No
         // gate entity configured means always show them. Reading the one key
         // here keeps the per-key observation intact -- see CardContext.
-        val voiceCfg = config.voice
+        // Page-effective: the listening prompts (and the Apple TV the audio is
+        // posted to) should belong to the room whose page is showing.
+        val voiceCfg = config.voice.mergedWith(
+            config.pages.getOrNull(pagerState.currentPage)?.voice
+        )
         val prompts = when {
             voiceCfg == null || voiceCfg.suggestions.isEmpty() -> emptyList()
             voiceCfg.suggestEntity == null -> voiceCfg.suggestions
@@ -237,7 +279,11 @@ fun Dashboard(
                 haUrl = haUrl,
                 setupUrl = setupUrl,
                 onSetup = onSetup,
-                onSync = { onSync(); showSettings = false },
+                deviceName = deviceName,
+                adbStatus = adbStatus,
+                statusTitle = config.status?.title,
+                onStatus = { onStatusOpen(true) },
+                onSync = { onSync(); onSettingsOpen(false) },
                 bridgeConnected = bridgeConnected,
                 bridgeCommand = bridgeCommand,
                 stockAllowed = stockAllowed,
@@ -245,7 +291,7 @@ fun Dashboard(
                 stockStops = stockStops,
                 stockStopAt = stockStopAt,
                 onPick = { item ->
-                    showSettings = false
+                    onSettingsOpen(false)
                     // Launch from the ACTIVITY and WITHOUT FLAG_ACTIVITY_NEW_TASK,
                     // so Settings stacks on this app's task and BACK walks back
                     // here. With NEW_TASK it lands in a task of its own, BACK
@@ -262,10 +308,19 @@ fun Dashboard(
                     }
                     Unit
                 },
-                onDismiss = { showSettings = false },
+                onDismiss = { onSettingsOpen(false) },
             )
         }
 
+        // Above the settings sheet: opened FROM it, and closing it returns there.
+        config.status?.takeIf { showStatus }?.let { st ->
+            StatusSheet(
+                title = st.title,
+                cards = st.cards,
+                ctx = ctx,
+                onDismiss = { onStatusOpen(false) },
+            )
+        }
     }
 }
 
@@ -449,6 +504,13 @@ private fun SettingsSheet(
     panel: com.custom.astrion.config.GesturePanel,
     onPick: (com.custom.astrion.config.GestureAction) -> Unit,
     onDismiss: () -> Unit,
+    /** Names THIS remote in the panel, above the build. */
+    deviceName: String = "",
+    /** Network-adb state, shown beside the bridge (both are deploy-time facts). */
+    adbStatus: String = "",
+    /** Shown as a row that opens the full-screen Status view; null hides the row. */
+    statusTitle: String? = null,
+    onStatus: () -> Unit = {},
     haUrl: String,
     setupUrl: String?,
     onSetup: () -> Unit,
@@ -478,7 +540,25 @@ private fun SettingsSheet(
                 .padding(horizontal = 22.dp, vertical = 18.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            // Grab handle. The drag detector lives HERE and not on the Column,
+            // because the Column is verticalScroll -- a pointerInput on it would
+            // either swallow the scroll or never fire. A dedicated handle also
+            // advertises the gesture instead of hiding it.
+            GrabHandle(onSwipeDown = onDismiss)
             Text(panel.title, color = Color(0xFFF1F4FA), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            statusTitle?.let { title ->
+                Text(
+                    title,
+                    color = Color(0xFFD7E3EA),
+                    fontSize = 17.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1E3841))
+                        .clickable { onStatus() }
+                        .padding(horizontal = 14.dp, vertical = 13.dp),
+                )
+            }
             panel.items.forEach { item ->
                 Text(
                     item.name,
@@ -496,6 +576,10 @@ private fun SettingsSheet(
             Spacer(Modifier.height(4.dp))
             Text("Screen-off keys", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
             InfoRow("Input bridge", if (bridgeConnected) "connected" else "not running")
+            // Next to the bridge because they fail together: a reboot drops
+            // network adb AND kills the bridge, and this row is how you find out
+            // without discovering it mid-deploy.
+            InfoRow("ADB over TCP", adbStatus.ifBlank { "—" })
             if (!bridgeConnected) {
                 // Shown only when it is missing, and it explains itself: the app
                 // cannot start this. /dev/input needs group 1004 and the
@@ -564,6 +648,10 @@ private fun SettingsSheet(
 
             Spacer(Modifier.height(4.dp))
             Text("Astrion Custom", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            // Which remote this is, above the build: with three identical units
+            // on one layout, "which one am I holding" is the first question the
+            // panel should answer.
+            InfoRow("Remote", deviceName.ifBlank { "unnamed" })
             InfoRow("Build", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             InfoRow("Home Assistant", haUrl.ifBlank { "not configured" })
             InfoRow("Setup server", setupUrl ?: "off")
@@ -788,5 +876,85 @@ private fun UnknownCard(type: String) {
             .padding(14.dp),
     ) {
         Text("Unknown card type: \"$type\"", color = Color(0xFFE0A0A0), fontSize = 13.sp)
+    }
+}
+
+/**
+ * A short bar at the top of a sheet that closes it on a downward drag.
+ *
+ * Separate from the sheet body on purpose: sheet bodies scroll, and a vertical
+ * drag detector on a scrolling container either consumes the scroll or never
+ * sees the gesture. Giving the gesture its own non-scrolling strip resolves
+ * that, and makes the affordance visible rather than hidden.
+ *
+ * The 6f threshold matches StatusBar's swipe-to-open so both directions feel
+ * the same.
+ */
+@Composable
+private fun GrabHandle(onSwipeDown: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp)
+            .pointerInput(onSwipeDown) {
+                detectVerticalDragGestures { change, drag ->
+                    if (drag > 6f) {
+                        change.consume()
+                        onSwipeDown()
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(44.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color(0xFF3A5A66)),
+        )
+    }
+}
+
+/**
+ * The Status view: the same cards any page can hold, full screen, reached from
+ * the swipe-up panel instead of occupying a dot on the pager.
+ *
+ * These readouts are reference material you go LOOKING for -- "what is the chain
+ * actually doing right now" -- rather than something glanced at in passing, so
+ * they do not earn a permanent place next to the rooms used daily.
+ */
+@Composable
+private fun StatusSheet(
+    title: String,
+    cards: List<CardConfig>,
+    ctx: CardContext,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0E2229)),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+        ) {
+            GrabHandle(onSwipeDown = onDismiss)
+            Text(
+                title,
+                color = Color(0xFFF1F4FA),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
+            )
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(cards) { card -> RenderCard(card, ctx) }
+            }
+        }
     }
 }

@@ -24,6 +24,14 @@ enum class HardwareKey {
     UNKNOWN;
 
     companion object {
+        /**
+         * Cached because values() allocates a fresh array on every call, and the
+         * quiet-key resolver walks the whole enum on every keypress on a 1 GB
+         * MT6580. Twenty-four throwaway arrays per press is free elsewhere and
+         * not here.
+         */
+        val ALL: List<HardwareKey> = values().toList()
+
         // Android keycode -> logical button, from device_key_code.json (HA100),
         // corrected against the real hardware: the physical MUTE button emits
         // 164 (KEYCODE_VOLUME_MUTE), not 82/91. 82 is KEYCODE_MENU (the button
@@ -106,17 +114,22 @@ enum class HardwareKey {
 class HardwareKeyRouter {
     private val shortHandlers = mutableMapOf<HardwareKey, () -> Boolean>()
     private val longHandlers = mutableMapOf<HardwareKey, () -> Boolean>()
-    private val repeatable = mutableSetOf<HardwareKey>()
+    private val repeatable = mutableMapOf<HardwareKey, () -> Boolean>()
 
     /**
      * @param repeats whether holding the key should fire the handler again and
      *   again. True for level-triggered things like volume and channel; FALSE
      *   for edge-triggered ones like starting a voice capture, where auto-repeat
      *   would toggle it on and off several times a second.
+     *
+     *   A SUPPLIER rather than a Boolean because one key can be both: bindings
+     *   are page-scoped, so the same key may be a repeating volume step on one
+     *   page and an edge-triggered page jump on another. Deciding at bind time
+     *   would freeze whichever page happened to be loaded first.
      */
-    fun on(key: HardwareKey, repeats: Boolean = true, handler: () -> Boolean) {
+    fun on(key: HardwareKey, repeats: () -> Boolean = { true }, handler: () -> Boolean) {
         shortHandlers[key] = handler
-        if (repeats) repeatable += key else repeatable -= key
+        repeatable[key] = repeats
     }
 
     fun onLong(key: HardwareKey, handler: () -> Boolean) {
@@ -132,7 +145,8 @@ class HardwareKeyRouter {
 
     /** True if holding this key should re-fire its handler. */
     fun repeatsWhileHeld(code: Int): Boolean =
-        HardwareKey.fromKeyCode(code).let { it != HardwareKey.UNKNOWN && it in repeatable }
+        HardwareKey.fromKeyCode(code)
+            .let { it != HardwareKey.UNKNOWN && repeatable[it]?.invoke() == true }
 
     /**
      * Handlers by logical key, for callers that already resolved one -- the

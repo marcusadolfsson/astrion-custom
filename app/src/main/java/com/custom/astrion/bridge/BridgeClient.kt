@@ -102,8 +102,15 @@ class BridgeClient(
                                     // wake the display; anything else is a
                                     // duplicate.
                                     if (!wasDark) return@launch
+                                    // Decide quiet BEFORE running the action.
+                                    // The quiet set depends on the page being
+                                    // shown, and an action can CHANGE the page --
+                                    // asking afterwards judges the press by the
+                                    // page it led to rather than the one it
+                                    // arrived on.
+                                    val quiet = key in quietKeys()
                                     onKey(key)
-                                    if (key in quietKeys()) onQuietHandled()
+                                    if (quiet) onQuietHandled()
                                 }
                             }
                         }

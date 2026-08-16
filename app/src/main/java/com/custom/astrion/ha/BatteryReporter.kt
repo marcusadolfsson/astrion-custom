@@ -23,20 +23,25 @@ import kotlinx.coroutines.launch
  * questions like "did stopping the OEM launcher actually help", and that needs
  * a recorded series, not a reading.
  *
- * WHY REST AND NOT THE WEBSOCKET. The app already holds an authenticated
- * WebSocket, but that API calls services -- and setting a state is not a
- * service. `POST /api/states/<entity>` is the only way to publish a value HA
- * did not already know about, so this is the one place the app talks HTTP.
+ * WHY A SERVICE CALL AND NOT `POST /api/states`. Publishing a state that way
+ * needs an ADMIN token (a non-admin gets 401), and each remote now authenticates
+ * as its own scoped user rather than sharing the owner's credentials. Writing an
+ * `input_number` instead is a plain service call, which any user may make.
  *
- * ONE CONSEQUENCE WORTH KNOWING: states created this way do NOT survive a Home
- * Assistant restart. The entity disappears until the next post, which is why
- * the interval is short enough to make that a blip rather than a gap.
+ * It also fixes the flaw the REST version documented and lived with: states
+ * created over REST vanish on every Home Assistant restart, so the curve was
+ * full of holes. An input_number is a real, restored entity.
+ *
+ * The helper is per REMOTE (`entityId` comes from the runtime device name), so
+ * three remotes no longer overwrite one shared sensor -- which is what they did
+ * the moment the app was installed on more than one.
  */
 class BatteryReporter(
     private val context: Context,
     private val client: HaClient,
     private val scope: CoroutineScope,
-    private val entityId: String = "sensor.astrion_remote_battery",
+    /** input_number this remote owns, e.g. input_number.astrion_living_battery. */
+    private val entityId: String,
 ) {
     private var level: Int = -1
     private var charging: Boolean = false
@@ -78,23 +83,20 @@ class BatteryReporter(
 
     private fun post() {
         if (level < 0) return
+        // No device name configured -> no helper to write to. Publishing into a
+        // shared entity is what this change exists to stop.
+        if (!entityId.contains(Regex("astrion_[a-z0-9_]+_battery"))) return
         lastPosted = level
         // device_class + state_class are what make HA treat this as a real
         // battery sensor: correct icon and units in the UI, and long-term
         // statistics rather than raw history that the recorder purges.
-        val json = """
-            {"state":"$level",
-             "attributes":{
-               "friendly_name":"Astrion Remote Battery",
-               "unit_of_measurement":"%",
-               "device_class":"battery",
-               "state_class":"measurement",
-               "icon":"${if (charging) "mdi:battery-charging" else "mdi:battery"}",
-               "charging":$charging
-             }}
-        """.trimIndent().replace("\n", "")
-        client.postJson("/api/states/$entityId", json)
-        Log.d(TAG, "posted $level% (charging=$charging)")
+        // Only the value: an input_number carries its own name, unit, icon and
+        // statistics settings from its HA definition, so there is nothing else
+        // to publish and nothing here to keep in sync with the helper.
+        client.callService(
+            ServiceCall.of("input_number", "set_value", entityId, "value" to level)
+        )
+        Log.d(TAG, "posted $level% to $entityId (charging=$charging)")
     }
 
     companion object {

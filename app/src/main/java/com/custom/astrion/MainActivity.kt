@@ -22,6 +22,8 @@ import kotlin.math.sqrt
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,8 +36,12 @@ import android.content.IntentFilter
 import com.custom.astrion.config.EntityRefs
 import com.custom.astrion.config.HotkeyConfig
 import com.custom.astrion.config.JsonPlain
+import com.custom.astrion.config.PageConfig
+import com.custom.astrion.config.VoiceConfig
+import com.custom.astrion.config.mergedWith
 import com.custom.astrion.ha.HaClient
 import com.custom.astrion.ha.ServiceCall
+import com.custom.astrion.input.AdbStatus
 import com.custom.astrion.input.HardwareKey
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
@@ -75,6 +81,11 @@ class MainActivity : ComponentActivity() {
         // "moved", and a cooldown so a single lift fires one wake.
         const val MOTION_THRESHOLD = 0.9f
         const val WAKE_COOLDOWN_MS = 2000L
+
+        // Ignore motion for this long after the display turns off -- long enough
+        // to cover setting the remote down, short enough that deliberately
+        // picking it back up still feels immediate.
+        const val MOTION_SETTLE_MS = 6000L
     }
 
     // Long-press timing state.
@@ -105,9 +116,15 @@ class MainActivity : ComponentActivity() {
     /** When the display last turned on, for telling a waking press from a normal one. */
     @Volatile private var screenOnAt = 0L
 
+    /** When the display last turned off, for the motion-wake settle window. */
+    @Volatile private var screenOffAt = 0L
+
     private val screenWatcher = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
-            if (i?.action == Intent.ACTION_SCREEN_ON) screenOnAt = SystemClock.elapsedRealtime()
+            when (i?.action) {
+                Intent.ACTION_SCREEN_ON -> screenOnAt = SystemClock.elapsedRealtime()
+                Intent.ACTION_SCREEN_OFF -> screenOffAt = SystemClock.elapsedRealtime()
+            }
         }
     }
 
@@ -159,15 +176,80 @@ class MainActivity : ComponentActivity() {
      * without a reinstall -- the whole point of moving it out of a constant.
      */
     private fun quietKeys(): Set<HardwareKey> {
-        val hotkeys = dashboard.config.hotkeys + dashboard.config.longHotkeys
-        val stated = hotkeys.mapNotNull { hk ->
-            val q = hk.quiet ?: return@mapNotNull null
-            val key = runCatching { HardwareKey.valueOf(hk.key.uppercase()) }.getOrNull()
-                ?: return@mapNotNull null
+        // Resolved per key for the ACTIVE page, so the quiet flag always travels
+        // with the binding that will actually run -- which is what makes this
+        // correct when the same keycode is a page jump on one page and transport
+        // on another.
+        val stated = HardwareKey.ALL.mapNotNull { key ->
+            val q = (shortFor(key)?.quiet ?: longFor(key)?.quiet) ?: return@mapNotNull null
             key to q
         }
         return DEFAULT_QUIET_KEYS + stated.filter { it.second }.map { it.first } -
             stated.filterNot { it.second }.map { it.first }.toSet()
+    }
+
+    /**
+     * The page whose bindings the physical keys currently obey, BY NAME.
+     *
+     * By name and not index because a Sync can reorder pages: an index would
+     * silently repoint the keys at whatever slid into that slot, and with the
+     * screen off that window is unbounded.
+     *
+     * null = the pager has not reported yet (cold start), the only moment
+     * startPage is consulted. Once settled it stays put even with the display
+     * off: the page is a MODE, not a view, and treating a display timeout as
+     * "back to the default room" would silently move the volume key mid-film.
+     *
+     * A plain field rather than mutableStateOf -- nothing composable reads it,
+     * so making it snapshot state would feed a write from the pager's collector
+     * back into the tree it came from for no benefit.
+     */
+    @Volatile
+    private var currentPageName: String? = null
+
+    /**
+     * The last page value seen on, or written to, `page_entity`.
+     *
+     * This is the echo-loop guard. The entity is mirrored BOTH ways -- HA writing
+     * it navigates us, and a swipe writes it back -- so without a memory of what
+     * we last exchanged, our own write comes back as an incoming change and
+     * bounces. Comparing against the live entity state is not enough: HA's echo
+     * arrives before the state we compare to has settled.
+     */
+    @Volatile
+    private var lastPageSync: String? = null
+
+    /**
+     * The pager settled on a page. Adopt it for hotkey scoping, and report it to
+     * HA if this remote has a page entity.
+     */
+    private fun onPagerSettled(index: Int) {
+        val name = dashboard.config.pages.getOrNull(index)?.name ?: return
+        currentPageName = name
+        val entity = dashboard.config.pageEntity ?: return
+        if (name == lastPageSync) return
+        lastPageSync = name
+        client.callService(
+            ServiceCall.of("input_select", "select_option", entity, "option" to name)
+        )
+    }
+
+    /**
+     * Follow HA when it writes the page entity.
+     *
+     * Called on every entity publish, which is cheap: it is a map lookup and a
+     * string compare, and it no-ops unless the value actually differs from what
+     * we last exchanged.
+     */
+    private fun followPageEntity(entities: com.custom.astrion.ha.EntityMap) {
+        val entity = dashboard.config.pageEntity ?: return
+        val want = entities[entity]?.state ?: return
+        if (want.isBlank() || want == lastPageSync) return
+        val idx = dashboard.config.pages.indexOfFirst { it.name.equals(want, ignoreCase = true) }
+        if (idx < 0) return
+        lastPageSync = want
+        currentPageName = dashboard.config.pages[idx].name
+        navTarget = idx
     }
 
     /**
@@ -190,7 +272,15 @@ class MainActivity : ComponentActivity() {
      * can see it: this is not a HA-managed device, so without this the only
      * readings are spot values taken over adb while someone is looking.
      */
-    private val battery by lazy { BatteryReporter(this, client, lifecycleScope) }
+    /** Slug naming this remote's helper entities; blank = publish nothing. */
+    private val deviceName: String by lazy { ConnectionConfig.load(this).device }
+
+    private val battery by lazy {
+        BatteryReporter(
+            this, client, lifecycleScope,
+            entityId = "input_number.astrion_${deviceName}_battery",
+        )
+    }
 
     private val bridge by lazy {
         BridgeClient(
@@ -271,19 +361,22 @@ class MainActivity : ComponentActivity() {
      * without drawing a cliff through the statistics.
      */
     private fun postStockStops(count: Int, atMs: Long) {
-        val json = """
-            {"state":"$count",
-             "attributes":{
-               "friendly_name":"Astrion Stock App Stops",
-               "state_class":"total_increasing",
-               "icon":"mdi:close-octagon-outline",
-               "last_stop":"${if (atMs > 0) java.text.SimpleDateFormat(
-                   "yyyy-MM-dd'T'HH:mm:ssZ", java.util.Locale.US).format(java.util.Date(atMs)) else ""}"
-             }}
-        """.trimIndent().replace("\n", "")
-        lifecycleScope.launch(Dispatchers.IO) {
-            client.postJson("/api/states/sensor.astrion_stock_app_stops", json)
-        }
+        // A service call, not POST /api/states: publishing a state needs an ADMIN
+        // token, and each remote now authenticates as its own scoped user. The
+        // helper is per remote, so three of them no longer overwrite one counter.
+        //
+        // The `last_stop` timestamp the REST version carried as an attribute is
+        // gone -- an input_number holds a value and nothing else. The count and
+        // its own last_changed answer the same question ("how often, and when
+        // was the most recent") without a second helper.
+        if (deviceName.isBlank()) return
+        client.callService(
+            ServiceCall.of(
+                "input_number", "set_value",
+                "input_number.astrion_${deviceName}_stock_stops",
+                "value" to count,
+            )
+        )
     }
 
     private fun sleepScreen() {
@@ -300,6 +393,31 @@ class MainActivity : ComponentActivity() {
 
     /** Page index requested by a hardware button; consumed by the Dashboard. */
     private var navTarget by mutableStateOf<Int?>(null)
+
+    /**
+     * Overlay visibility, owned here rather than inside the Dashboard composable
+     * so dispatchKeyEvent can see it -- see the BACK interception below.
+     */
+    private var settingsOpen by mutableStateOf(false)
+    private var statusOpen by mutableStateOf(false)
+
+    /** Network-adb state, refreshed when the panel opens (see AdbStatus). */
+    private var adbStatus by mutableStateOf("—")
+
+    private fun refreshAdbStatus() {
+        // Off the main thread: it execs getprop and opens a socket.
+        lifecycleScope.launch(Dispatchers.IO) {
+            val s = AdbStatus.describe()
+            runOnUiThread { adbStatus = s }
+        }
+    }
+
+    /** Close the topmost overlay. True if there was one. */
+    private fun dismissOverlay(): Boolean = when {
+        statusOpen -> { statusOpen = false; true }
+        settingsOpen -> { settingsOpen = false; true }
+        else -> false
+    }
 
     /** Section (separator name) to scroll to; consumed by the Dashboard. */
     private var scrollTarget by mutableStateOf<String?>(null)
@@ -396,7 +514,7 @@ class MainActivity : ComponentActivity() {
         }
         client = HaClient(baseUrl = conn.url, token = conn.token)
         voice = VoiceSession(baseUrl = conn.url, token = conn.token)
-        bindHotkeys(dashboard.config.hotkeys, dashboard.config.longHotkeys)
+        rebuildBindings()
         // Load the cached layout first so the initial subscribe is already
         // filtered — avoids a 0.7 MB whole-instance seed on every launch.
         reloadDashboard()
@@ -410,7 +528,13 @@ class MainActivity : ComponentActivity() {
             startSetupServer()
         }
 
-        registerReceiver(screenWatcher, IntentFilter(Intent.ACTION_SCREEN_ON))
+        registerReceiver(
+            screenWatcher,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
+            },
+        )
         bridge.start()
         battery.start()
         // Poll the client's flag for display only. A StateFlow would be tidier,
@@ -439,6 +563,12 @@ class MainActivity : ComponentActivity() {
             val entities = client.entities.collectAsState()
             val connection = client.connection.collectAsState()
             val voiceState = voice.state.collectAsState()
+            // Follow HA-driven page changes. Keyed on the state object rather
+            // than its value so the collector is started once, not restarted on
+            // every publish tick.
+            LaunchedEffect(entities) {
+                snapshotFlow { entities.value }.collect { followPageEntity(it) }
+            }
             Dashboard(
                 client = client,
                 entitiesState = entities,
@@ -457,6 +587,13 @@ class MainActivity : ComponentActivity() {
                 onSetup = { if (setupUrl == null) startSetupServer() else stopSetupServer() },
                 voiceState = voiceState.value,
                 onVoiceDismiss = { voice.dismiss() },
+                onPageChange = { i -> onPagerSettled(i) },
+                deviceName = deviceName,
+                settingsOpen = settingsOpen,
+                onSettingsOpen = { settingsOpen = it; if (it) refreshAdbStatus() },
+                adbStatus = adbStatus,
+                statusOpen = statusOpen,
+                onStatusOpen = { statusOpen = it },
                 bridgeConnected = bridgeConnected,
                 bridgeCommand = bridgeCommand(),
                 stockAllowed = stockAllowed,
@@ -521,7 +658,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun applyDashboard(result: DashboardLoader.Result) {
         dashboard = result
-        bindHotkeys(result.config.hotkeys, result.config.longHotkeys)
+        rebuildBindings()
         client.setSubscribedEntities(EntityRefs.collect(result.config))
     }
 
@@ -553,22 +690,92 @@ class MainActivity : ComponentActivity() {
 
     // ---- hotkeys ------------------------------------------------------------
 
-    /** Rebind the physical buttons to the config's short- and long-press hotkeys. */
-    private fun bindHotkeys(short: List<HotkeyConfig>, long: List<HotkeyConfig>) {
-        keyRouter.clear()
-        short.forEach { hk ->
+    /** A key -> binding index, built once per config load. */
+    private class Bindings(
+        val short: Map<HardwareKey, HotkeyConfig>,
+        val long: Map<HardwareKey, HotkeyConfig>,
+    )
+
+    private var globalBindings = Bindings(emptyMap(), emptyMap())
+    /** Keyed by lowercased page name -- see currentPageName for why not by index. */
+    private var pageBindings: Map<String, Bindings> = emptyMap()
+
+    private fun index(list: List<HotkeyConfig>): Map<HardwareKey, HotkeyConfig> {
+        val out = LinkedHashMap<HardwareKey, HotkeyConfig>()
+        list.forEach { hk ->
             val key = runCatching { HardwareKey.valueOf(hk.key.uppercase()) }.getOrNull()
                 ?: return@forEach
-            // Only a plain service call repeats while held. Built-in actions
-            // (voice, sync) and navigation are edge-triggered: auto-repeat would
-            // fire them many times a second.
-            val repeats = hk.action == null && hk.page == null && hk.scrollTo == null
-            keyRouter.on(key, repeats) { runHotkey(hk) }
+            // First wins, matching how page lookup uses indexOfFirst.
+            if (!out.containsKey(key)) out[key] = hk
         }
-        long.forEach { hk ->
-            val key = runCatching { HardwareKey.valueOf(hk.key.uppercase()) }.getOrNull()
-                ?: return@forEach
-            keyRouter.onLong(key) { runHotkey(hk) }
+        return out
+    }
+
+    /** Rebuild both binding tables from the live config, then (re)bind the router. */
+    private fun rebuildBindings() {
+        val cfg = dashboard.config
+        globalBindings = Bindings(index(cfg.hotkeys), index(cfg.longHotkeys))
+        pageBindings = cfg.pages.associate { p ->
+            p.name.lowercase() to Bindings(index(p.hotkeys), index(p.longHotkeys))
+        }
+        bindHotkeys()
+    }
+
+    private fun activePage(): PageConfig? {
+        val cfg = dashboard.config
+        val name = currentPageName ?: cfg.pages.getOrNull(cfg.startPage)?.name
+        return cfg.pages.firstOrNull { it.name.equals(name, ignoreCase = true) }
+    }
+
+    private fun activeBindings(): Bindings? {
+        val cfg = dashboard.config
+        val name = currentPageName ?: cfg.pages.getOrNull(cfg.startPage)?.name
+        return name?.let { pageBindings[it.lowercase()] }
+    }
+
+    // Per-KEY fallback, page then global. Not all-or-nothing: a room page
+    // overrides the handful of keys it cares about and inherits POWER, VOICE,
+    // MENU and CUSTOM_1..4 rather than having to restate them -- which is the
+    // same trap that once shipped two dead buttons in a device override.
+    private fun shortFor(k: HardwareKey): HotkeyConfig? =
+        activeBindings()?.short?.get(k) ?: globalBindings.short[k]
+
+    private fun longFor(k: HardwareKey): HotkeyConfig? =
+        activeBindings()?.long?.get(k) ?: globalBindings.long[k]
+
+    /** The VOICE config for the page being shown, over the global one. */
+    private fun effectiveVoice(): VoiceConfig? =
+        dashboard.config.voice.mergedWith(activePage()?.voice)
+
+    /**
+     * Bind the UNION of every key mentioned anywhere, once, with handlers that
+     * resolve at PRESS time.
+     *
+     * Deliberately not re-bound on page change. dispatchKeyEvent re-looks-up its
+     * handler on every event including ACTION_UP, and a page-navigating key fires
+     * its action on the UP edge -- so a keyRouter.clear() between a key's DOWN and
+     * UP would run the NEW page's binding for that key, breaking precisely the
+     * keys this feature exists for. Lazy resolution also means the screen-on path
+     * and the bridge's screen-off path consult the same resolver at the same
+     * instant, which is a stronger guarantee than keeping two tables in step.
+     */
+    private fun bindHotkeys() {
+        keyRouter.clear()
+        val shortKeys = globalBindings.short.keys + pageBindings.values.flatMap { it.short.keys }
+        val longKeys = globalBindings.long.keys + pageBindings.values.flatMap { it.long.keys }
+        shortKeys.forEach { key ->
+            keyRouter.on(
+                key,
+                // Only a plain service call repeats while held. Built-in actions
+                // (voice, sync) and navigation are edge-triggered: auto-repeat
+                // would fire them many times a second.
+                repeats = {
+                    shortFor(key)?.let { it.action == null && it.page == null && it.scrollTo == null } == true
+                },
+            ) { shortFor(key)?.let { runHotkey(it) } ?: false }
+        }
+        longKeys.forEach { key ->
+            keyRouter.onLong(key) { longFor(key)?.let { runHotkey(it) } ?: false }
         }
     }
 
@@ -585,13 +792,18 @@ class MainActivity : ComponentActivity() {
         }
         if (hk.action?.equals("voice", ignoreCase = true) == true) {
             // Press to talk; it ends itself on silence. A second press cancels.
-            voice.toggle(dashboard.config.voice)
+            voice.toggle(effectiveVoice())
             handled = true
         }
         hk.page?.let { pageName ->
             val idx = dashboard.config.pages.indexOfFirst { it.name.equals(pageName, ignoreCase = true) }
             if (idx >= 0) {
                 navTarget = idx
+                // Adopt the new page IMMEDIATELY rather than waiting for the
+                // pager to confirm. With the screen off the Recomposer is
+                // paused, so the pager does not move until wake -- a second dark
+                // press would otherwise still resolve against the old page.
+                currentPageName = dashboard.config.pages[idx].name
                 handled = true
             }
         }
@@ -620,6 +832,18 @@ class MainActivity : ComponentActivity() {
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val code = event.keyCode
+
+        // BACK closes an open sheet, and must be checked BEFORE the key router.
+        // BACK is bound to the AV back action, so the lookup below would consume
+        // it and Android would never call onBackPressed() -- pressing BACK with
+        // a sheet open would navigate the Apple TV instead of closing the sheet.
+        if (code == KeyEvent.KEYCODE_BACK &&
+            event.action == KeyEvent.ACTION_DOWN &&
+            (statusOpen || settingsOpen)
+        ) {
+            dismissOverlay()
+            return true
+        }
         val shortH = keyRouter.shortHandler(code)
         val longH = keyRouter.longHandler(code)
 
@@ -691,6 +915,13 @@ class MainActivity : ComponentActivity() {
     private fun wakeScreen() {
         val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
         if (pm.isInteractive) return // already on — nothing to do
+        // Settle window. The motion that matters is someone PICKING THE REMOTE
+        // UP; the motion right after the screen times out is usually the tail of
+        // putting it down, or the surface it is on still settling. Without this
+        // the display lights again within a second or two of sleeping, over and
+        // over, which is both maddening and the opposite of the battery saving
+        // the timeout exists for.
+        if (SystemClock.elapsedRealtime() - screenOffAt < MOTION_SETTLE_MS) return
         val now = System.currentTimeMillis()
         if (now - lastWakeMs < WAKE_COOLDOWN_MS) return
         lastWakeMs = now

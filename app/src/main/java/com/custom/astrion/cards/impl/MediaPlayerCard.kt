@@ -85,11 +85,49 @@ class MediaPlayerCard : CardRenderer {
         val e = ctx.entities[entityId]
         val playing = e?.state == "playing"
         val realTitle = e?.attrString("media_title")?.takeIf { it.isNotBlank() }
-        val title = realTitle ?: e?.friendlyName ?: entityId
-        val artist = e?.attrString("media_artist")
-            ?: e?.attrString("media_series_title")
-            ?: e?.attrString("app_name")
+        // `title` is resolved after the staleness check below, which needs to
+        // be able to discard it.
+        // Resolved below too, for the same reason: artist and series title come
+        // out of the same now-playing record as the title and go stale with it.
+        // `app_name` does NOT — it reports the foreground app and stays correct —
+        // so it survives as the subtitle when the rest is discarded.
         val artPath = e?.attrString("entity_picture")?.takeIf { it.isNotBlank() }
+
+        // Hide a title we can no longer vouch for.
+        //
+        // An Apple TV serves two independent things: which app is in the
+        // foreground (current) and the tvOS "now playing" record (whatever an app
+        // last registered). Disney+ in particular often never re-registers, so
+        // the card confidently captioned a live show with the episode watched two
+        // days earlier — right app, wrong programme, and no way to tell from the
+        // card that it was reading a stale record.
+        //
+        // `media_position_updated_at` is the honest witness: it is stamped when
+        // the player last reported a position, so an ancient value means nothing
+        // has reported in for that long. The threshold is HOURS, not minutes, on
+        // purpose — a genuinely paused film legitimately holds its position for a
+        // long evening, and hiding a correct title would be the worse error. Six
+        // hours clears that while still catching the two-day case.
+        //
+        // Deliberately not treating `state` as the signal: this same entity read
+        // `paused` while audio was demonstrably playing, so state is exactly as
+        // stale as the record it comes from.
+        val staleAfterMs = config.int("stale_after_minutes", 360).coerceAtLeast(1) * 60_000L
+        val reportedAt = e?.attrString("media_position_updated_at")
+        val stale = reportedAt?.let { ts ->
+            runCatching {
+                // OffsetDateTime, NOT Instant.parse. Instant.parse uses
+                // ISO_INSTANT, which insists on a trailing `Z` and throws on the
+                // `+00:00` offset Home Assistant actually emits
+                // ("2026-08-14T20:39:36.729036+00:00"). That threw on every
+                // single call, runCatching swallowed it, and the card went on
+                // showing two-day-old titles while looking like the check worked.
+                val t = ts.trim().replace(" ", "T")
+                val instant = runCatching { java.time.OffsetDateTime.parse(t).toInstant() }
+                    .getOrElse { java.time.Instant.parse(t) }
+                System.currentTimeMillis() - instant.toEpochMilli() > staleAfterMs
+            }.getOrDefault(false) // fail OPEN: a parse we cannot do must not hide a good card
+        } ?: false
 
         // Collapse the full card entirely when nothing is actually playing.
         //
@@ -99,7 +137,17 @@ class MediaPlayerCard : CardRenderer {
         // the card stayed on screen as a purple square captioned with the
         // device's own name — the friendly-name fallback below standing in for
         // a title that was never there.
-        if (full && realTitle == null) return
+        if (full && (realTitle == null || stale)) return
+
+        // The compact variant has no collapse path -- it is a persistent row --
+        // so it degrades to the device's own name instead of vanishing. Showing
+        // "Master Bedroom" is honest; showing last week's episode is not.
+        val title = (if (stale) null else realTitle) ?: e?.friendlyName ?: entityId
+        val artist = if (stale) e?.attrString("app_name") else (
+            e?.attrString("media_artist")
+                ?: e?.attrString("media_series_title")
+                ?: e?.attrString("app_name")
+        )
 
         var art by remember(artPath) { mutableStateOf<ImageBitmap?>(null) }
         LaunchedEffect(artPath) { art = artPath?.let { ctx.client.fetchBitmap(it) } }

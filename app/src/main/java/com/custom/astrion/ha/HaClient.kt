@@ -55,6 +55,9 @@ class HaClient(
         private const val TAG = "HaClient"
         private const val PING_INTERVAL_MS = 30_000L
         private const val PUBLISH_INTERVAL_MS = 120L
+
+        /** Cap on messages held while unauthenticated -- see send(). */
+        private const val MAX_QUEUED = 32
     }
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -75,6 +78,12 @@ class HaClient(
 
     /** Outstanding request/response commands (e.g. browse_media), keyed by id. */
     private val pending = ConcurrentHashMap<Int, CompletableDeferred<JsonObject>>()
+
+    /** True only between auth_ok and the socket closing -- see send(). */
+    @Volatile private var authed = false
+
+    /** Messages raised before the handshake completed, flushed on auth_ok. */
+    private val outbox = java.util.concurrent.ConcurrentLinkedQueue<JsonObject>()
 
     private val _connection = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connection: StateFlow<ConnectionState> = _connection.asStateFlow()
@@ -301,6 +310,7 @@ class HaClient(
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             Log.i(TAG, "Socket open, waiting for auth_required")
+            authed = false
             _connection.value = ConnectionState.AUTHENTICATING
         }
 
@@ -328,12 +338,14 @@ class HaClient(
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             Log.e(TAG, "Socket failure", t)
+            authed = false
             _connection.value = ConnectionState.ERROR
             scheduleReconnect()
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             Log.w(TAG, "Socket closed $code $reason")
+            authed = false
             if (_connection.value != ConnectionState.DISCONNECTED) scheduleReconnect()
         }
     }
@@ -349,10 +361,14 @@ class HaClient(
 
     private fun onAuthOk() {
         Log.i(TAG, "Authenticated")
+        authed = true
         _connection.value = ConnectionState.CONNECTED
         startPublisher()
         subscribe()
         startHeartbeat()
+        // After subscribe(), so the queued calls follow the subscription rather
+        // than racing it for the connection's first result ids.
+        flushOutbox()
     }
 
     /** Coalesce entity updates: publish the store to the StateFlow at a bounded rate. */
@@ -513,14 +529,59 @@ class HaClient(
         entitiesDirty = true // published by the coalescing publisher loop
     }
 
+    /**
+     * Queue anything raised before the handshake finishes, rather than sending it.
+     *
+     * Home Assistant's websocket accepts EXACTLY one kind of first message: the
+     * auth frame. Anything else and it answers "Auth message incorrectly
+     * formatted: extra keys not allowed @ data['domain']" and closes the socket --
+     * it does not skip the stray frame and carry on. So a service call raised in
+     * the window between onOpen and auth_ok does not merely arrive early, it
+     * POISONS the handshake, and the app lands in AUTH_FAILED with a perfectly
+     * valid token. That is exactly what happened after an HA restart: the
+     * reconnect raced a card's startup write, and the remote sat on "Auth failed
+     * -- check token" while curl with the same token returned 200.
+     *
+     * The queue is bounded because a socket that never authenticates would
+     * otherwise accumulate every press forever, and then replay a minute of stale
+     * commands at the thermostat the moment it came back. Dropping the oldest
+     * keeps the most recent intent, which is the one the user still wants.
+     */
     private fun send(msg: JsonObject) {
+        if (!authed) {
+            while (outbox.size >= MAX_QUEUED) outbox.poll()
+            outbox.add(msg)
+            return
+        }
         socket?.send(msg.toString())
     }
 
+    private fun flushOutbox() {
+        while (true) {
+            val msg = outbox.poll() ?: break
+            socket?.send(msg.toString())
+        }
+    }
+
+    /**
+     * AUTH_FAILED retries too, just slowly.
+     *
+     * It used to be terminal, on the reasoning that a rejected token will be
+     * rejected again. But "auth failed" is also what the app reports when the
+     * handshake is disturbed for reasons that have nothing to do with the token,
+     * and a remote that gives up permanently has to be noticed and relaunched by
+     * hand -- on a wall-mounted device, that is the worst possible failure mode.
+     * A minute between attempts is slow enough not to hammer a server that really
+     * is refusing us, and the banner stays up throughout either way.
+     */
     private fun scheduleReconnect() {
         scope.launch {
-            kotlinx.coroutines.delay(3_000)
-            if (_connection.value == ConnectionState.ERROR) connect()
+            val state = _connection.value
+            kotlinx.coroutines.delay(if (state == ConnectionState.AUTH_FAILED) 60_000 else 3_000)
+            when (_connection.value) {
+                ConnectionState.ERROR, ConnectionState.AUTH_FAILED -> connect()
+                else -> {}
+            }
         }
     }
 

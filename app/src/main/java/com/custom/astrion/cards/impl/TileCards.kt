@@ -2,6 +2,9 @@ package com.custom.astrion.cards.impl
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import com.custom.astrion.ui.ackColor
+import com.custom.astrion.ui.pressFeedback
+import com.custom.astrion.ui.rememberPressFeedback
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -216,12 +219,17 @@ private fun CircleBtn(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit,
 ) {
+    // Shared by the cover / fan / switch tiles. The fan is the case that earns
+    // it: a speed step goes out over LocalTuya and the percentage on the tile
+    // only moves once the fan reports back, so the button sits there looking
+    // untouched for about a second.
+    val (press, click) = rememberPressFeedback(onClick)
     Box(
         modifier = Modifier
             .size(46.dp)
             .clip(CircleShape)
-            .background(Color(0xFF2E7D95))
-            .clickable(onClick = onClick),
+            .background(ackColor(Color(0xFF2E7D95), press))
+            .pressFeedback(press, click),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = null, tint = Color.White)

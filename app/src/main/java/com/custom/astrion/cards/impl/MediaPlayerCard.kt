@@ -4,6 +4,9 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import com.custom.astrion.ui.ackColor
+import com.custom.astrion.ui.pressFeedback
+import com.custom.astrion.ui.rememberPressFeedback
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -226,13 +229,17 @@ class MediaPlayerCard : CardRenderer {
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     topButtons.forEach { b ->
+                        // Named action buttons fire scripts, so nothing on this
+                        // card necessarily changes when they land -- the same
+                        // reason the shade buttons needed acknowledging.
+                        val (press, click) = rememberPressFeedback { fireService(ctx, b) }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(44.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0x662C4C58)) // semi-transparent
-                                .clickable { fireService(ctx, b) },
+                                .background(ackColor(Color(0x662C4C58), press)) // semi-transparent
+                                .pressFeedback(press, click),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
@@ -313,12 +320,17 @@ class MediaPlayerCard : CardRenderer {
         accent: Boolean = false,
         onClick: () -> Unit,
     ) {
+        // Transport goes out to an Apple TV or the Kaleidescape and the card only
+        // repaints once that device reports back, which is a beat later than the
+        // press. It is the same "did that register" gap the shades have, just
+        // shorter -- and pressing play twice is worse than pressing it late.
+        val (press, click) = rememberPressFeedback(onClick)
         Box(
             modifier = Modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(if (accent) Color(0xFF4C6EF5) else Color(0x552C4C58))
-                .clickable(onClick = onClick),
+                .background(ackColor(if (accent) Color(0xFF4C6EF5) else Color(0x552C4C58), press))
+                .pressFeedback(press, click),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = Color.White)

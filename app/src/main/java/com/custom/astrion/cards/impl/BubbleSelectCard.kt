@@ -2,6 +2,8 @@ package com.custom.astrion.cards.impl
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -35,6 +38,7 @@ import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRenderer
 import com.custom.astrion.ha.ServiceCall
+import kotlin.math.roundToInt
 
 /**
  * Bubble-Card-style selector pill, matching the look of the HACS Bubble Card
@@ -55,6 +59,15 @@ import com.custom.astrion.ha.ServiceCall
  *       "options": [
  *         { "name": "Apple TV", "service": "script.lr_av_watch_apple_tv",
  *           "active_value": "Watch Apple TV" }, ... ] } }
+ *
+ * An option may instead be a brightness SLIDER, for a light that belongs with the
+ * scenes around it but needs a level rather than a choice:
+ *
+ *   { "type": "light", "entity_id": "light.master_bedroom_nightstand_1",
+ *     "name": "Nightstand His" }
+ *
+ * Put these LAST — they are controls, not choices, and the menu reads as a list of
+ * options until it stops being one.
  */
 class BubbleSelectCard : CardRenderer {
     override val type = "bubble_select"
@@ -112,6 +125,18 @@ class BubbleSelectCard : CardRenderer {
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     options.forEach { opt ->
                         val label = opt["name"] as? String ?: return@forEach
+                        // A `"type": "light"` entry is a brightness SLIDER, not a
+                        // menu choice. It deliberately does NOT go through
+                        // DropdownMenuItem: that consumes the gesture and closes
+                        // the menu on touch-down, which would dismiss the dropdown
+                        // the instant you started dragging -- i.e. the control
+                        // would be impossible to use. Rendering it as a plain row
+                        // that owns its own pointerInput keeps the menu open for
+                        // the whole drag.
+                        if (opt["type"] == "light") {
+                            LightSliderRow(opt, ctx)
+                            return@forEach
+                        }
                         val selected = opt["active_value"] == currentState
                         DropdownMenuItem(
                             contentPadding = PaddingValues(horizontal = 28.dp, vertical = 16.dp),
@@ -129,6 +154,107 @@ class BubbleSelectCard : CardRenderer {
                         )
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * A brightness slider living INSIDE the dropdown, for lights that belong to
+     * the same decision as the scenes above them ("make the room be like this")
+     * but need a level rather than a choice — the bedside nightstands.
+     *
+     * Same drag/commit semantics as `bubble_light` so the two behave identically:
+     * drag or tap anywhere along the row sets brightness, the fill tracks it
+     * locally for instant feedback and commits to HA on release, and dragging to
+     * zero turns the light off rather than setting 0%.
+     *
+     * Deliberately NOT a DropdownMenuItem — see the call site. Also deliberately
+     * without the long-press colour dialog `bubble_light` has: a popup opening on
+     * top of an already-open dropdown is a stack of two transient surfaces on a
+     * 3" screen, and the colour picker stays reachable from the full card.
+     */
+    @Composable
+    private fun LightSliderRow(opt: Map<String, Any?>, ctx: CardContext) {
+        val entityId = opt["entity_id"] as? String ?: return
+        val e = ctx.entities[entityId]
+        val on = e?.isOn == true
+        val label = opt["name"] as? String ?: e?.friendlyName ?: entityId
+
+        val brightness = e?.attrInt("brightness")
+        val level: Float = when {
+            !on -> 0f
+            brightness != null -> (brightness / 255f).coerceIn(0f, 1f)
+            else -> 1f
+        }
+        var dragLevel by remember(level) { mutableStateOf(level) }
+
+        fun commit(fraction: Float) {
+            val pct = (fraction.coerceIn(0f, 1f) * 100).roundToInt()
+            if (pct <= 0) {
+                ctx.client.callService(ServiceCall("light", "turn_off", entityId))
+            } else {
+                ctx.client.callService(
+                    ServiceCall.of("light", "turn_on", entityId, "brightness_pct" to pct)
+                )
+            }
+        }
+
+        // A plain Box, NOT BoxWithConstraints: a DropdownMenu measures its
+        // children's INTRINSIC width to size itself, and BoxWithConstraints is a
+        // SubcomposeLayout, which cannot answer an intrinsic measurement — it
+        // throws IllegalStateException and takes the whole app down the moment
+        // the menu opens. (Learned the hard way; the crash also drops the unit
+        // into Android's home-app chooser, since this app is HOME on Astrion 1.)
+        //
+        // Width is explicit for the same reason: fillMaxWidth() is meaningless
+        // inside a menu that sizes itself to its content. 240.dp fits the 480px
+        // / density-220 screen (~349dp wide) with room for the menu's margins.
+        Box(
+            modifier = Modifier
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .width(240.dp)
+                .height(56.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color(0xFF16292F))
+                .pointerInput(entityId) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = { commit(dragLevel) },
+                    ) { change, _ ->
+                        dragLevel = (change.position.x / size.width).coerceIn(0f, 1f)
+                    }
+                }
+                .pointerInput(entityId) {
+                    detectTapGestures { offset ->
+                        val frac = (offset.x / size.width).coerceIn(0f, 1f)
+                        dragLevel = frac
+                        commit(frac)
+                    }
+                },
+        ) {
+            if (on) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(dragLevel.coerceIn(0.001f, 1f))
+                        .background(Color(0xFFFFC24B).copy(alpha = 0.30f))
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    label,
+                    color = Color(0xFFF1F4FA),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (on) "${(dragLevel * 100).roundToInt()}%" else "Off",
+                    color = Color(0xFF93AFB6),
+                    fontSize = 20.sp,
+                )
             }
         }
     }

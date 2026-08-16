@@ -28,6 +28,25 @@ any action you want. Nothing depends on Sanytron's cloud or their HA integration
 |---|---|---|
 | ![Status](examples/screenshots/04-status.png) | ![Status lower](examples/screenshots/05-status-lower.png) | ![Settings sheet](examples/screenshots/12-settings-sheet.png) |
 
+| Climate card | Temperature picker | Mode selector |
+|---|---|---|
+| ![Climate](examples/screenshots/13-climate-card.png) | ![Picker](examples/screenshots/14-temperature-picker.png) | ![Mode](examples/screenshots/15-mode-selector.png) |
+
+The climate card shows the current temperature, the setpoint, what the system is
+doing right now, and — when a `hold_entity` is configured — a Holding chip whose
+⊗ resumes the schedule. Tapping anywhere on the card opens the picker; the mode
+button sits inline beside the wheel rather than in a corner, so the numbers stay
+on the dialog's centre line.
+
+| Select with sliders | Fan speeds |
+|---|---|
+| ![Select](examples/screenshots/16-select-with-sliders.png) | ![Fan](examples/screenshots/17-fan-dropdown.png) |
+
+Dropdowns are themed to match the app, and a `select` card can carry brightness
+sliders for the lights its options adjust. Compose takes menu and dialog colours
+from `MaterialTheme` rather than from the caller, so without the app's own theme
+these arrive in the default *light* palette on a dark dashboard.
+
 The layout behind these shots is [`examples/dashboard.yaml`](examples/dashboard.yaml)
 — a real, in-use configuration rather than a toy one.
 
@@ -41,11 +60,11 @@ layout) is unchanged. Each item below landed as its own commit.
 | Area | Change |
 |---|---|
 | **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional` |
-| **Changed cards** | `media_player` transport rework + auto-collapse, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
+| **Changed cards** | `bubble_climate` rebuilt (hold indicator, mode + dual setpoints, scrolling picker), brightness sliders inside `bubble_select`, `media_player` transport rework + auto-collapse + stale-metadata guard, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
 | **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
-| **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, swipe-up info panel |
+| **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, swipe-up info panel, per-remote start page and motion-wake tuning |
 | **Voice** | the VOICE key streams the mic to an endpoint you configure; ends on silence |
-| **UI** | transient volume / mute overlay, voice indicator |
+| **UI** | dark theme so menus and dialogs stop arriving white, press feedback on controls that answer late, transient volume / mute overlay, voice indicator |
 | **Build** | signed, R8-minified release (16 MB → 1.3 MB), bounded Gradle heap |
 | **Performance** | filtered entity subscription, per-key entity observation, card-level pass |
 
@@ -92,7 +111,7 @@ a toolchain — but **adding a brand-new card type means compiling** (see
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
-adb install releases/astrion-custom-0.28.0.apk
+adb install releases/astrion-custom-0.49.1.apk
 ```
 
 **Option B — build from source.** You need:

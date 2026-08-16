@@ -50,6 +50,21 @@ entity's state string exactly.**
 
 `open_on` is described under [Hotkeys](#hotkeys).
 
+An option may instead be a **brightness slider** (`"type": "light"`), which puts
+the lights a scene adjusts in the same menu that selects the scene — the natural
+place to look for them, and it saves a card each.
+
+```json
+{ "name": "Nightstand His", "type": "light",
+  "entity_id": "light.master_bedroom_nightstand_1" }
+```
+
+Implementation note if you add controls of your own here: a slider inside a
+`DropdownMenu` must use a plain `Box` with an **explicit width** and its own
+`pointerInput`. `BoxWithConstraints` throws in that position — the menu measures
+its content with unbounded constraints — and inheriting the menu item's gesture
+handling makes every drag select the item and close the menu.
+
 ### `shade_control`
 
 A cover controller with the target selector on the left and open / stop / close
@@ -70,20 +85,51 @@ HA side).
 
 ### `bubble_climate`
 
-A thermostat pill: name, `setpoint · now current`, and − / + buttons calling
-`climate.set_temperature`. The setpoint is tinted by `hvac_action`, so a glance
-tells you whether the system is actually cooling/heating rather than just set to.
+A thermostat card modelled on what a thermostat app shows: the **current**
+temperature large on the left, what the system is doing under it
+(idle / fan / cooling / heating), and the setpoint in a coloured pill on the
+right. Heat draws orange, cool blue — keyed on the **mode**, not on
+`hvac_action`, so a thermostat set to heat and currently idle is still orange
+rather than falling through to the cool colour.
 
-**Deliberately minimal** — no mode picker, fan speed, humidity or schedule. A
-remote in your hand is for "it's a degree too warm"; each extra control costs
-vertical space on a 480×800 screen and a press to hunt for. Anything beyond
-nudging the setpoint belongs on a wall dashboard, or use the stock `climate` card
-for the full set.
+Tapping anywhere on the card opens a scrolling temperature picker. The mode
+button (cool / heat / auto / off) sits inline beside the wheel, in a slot the
+same width as the +/− column opposite it, so the numbers stay on the dialog's
+centre line; it only offers the modes the entity actually advertises in
+`hvac_modes`. Commits happen when the wheel **settles**, not per frame — a fling
+across fifteen degrees would otherwise fire fifteen service calls.
+
+In `heat_cool` there is no single `temperature` attribute at all, so the card
+shows **both** bounds and the picker gets a toggle for which one is being edited.
+The wheel is keyed on mode *and* bound: heat and cool store separate setpoints,
+and keying on the bound alone leaves it sitting on the previous mode's number.
 
 ```json
 { "type": "bubble_climate", "options": {
-    "entity_id": "climate.living_room", "name": "Common Areas AC", "step": 1 } }
+    "entity_id": "climate.living_room", "step": 1,
+    "hold_entity": "binary_sensor.living_room_holding",
+    "clear_hold": "button.living_room_clear_hold" } }
 ```
+
+**Hold indicator.** `hold_entity` is any binary sensor that is `on` while the
+thermostat is off its schedule; when it is, the pill grows a "Holding" chip with
+a ⊗ that calls `clear_hold`. Both are optional and independent of any particular
+thermostat brand — the card only reads a binary sensor and presses a button.
+
+Resume dismisses the chip **optimistically for a bounded 12 seconds**. It has to
+look like it worked immediately and it cannot: the press goes to the thermostat,
+the thermostat updates its own state, and only then does the sensor change. If
+the hold is still there when the window expires the chip comes back, which is the
+honest outcome for a resume that failed.
+
+> The Home Assistant side of this is not shipped here, because it is specific to
+> how one manufacturer reports its schedule. For ecobee over HomeKit, note that
+> `VENDOR_ECOBEE_CURRENT_MODE` is not trustworthy on its own — it was observed
+> reporting "home" during a hold and "sleep" while running the away profile. The
+> thermostat also publishes each comfort profile's own heat/cool setpoints; the
+> reliable test is whether the active setpoint matches *some* profile, since a
+> scheduled setpoint is copied from one by definition and a held one is a number
+> somebody dialled in.
 
 ### `conditional`
 
@@ -736,3 +782,92 @@ draw as cards enter the viewport — not allocations. The changes are still corr
 (less main-thread work, less garbage, one less layer), and idle cost is good
 (~2 % CPU, 2.8 MB Java heap), but if you are chasing scroll smoothness the next
 lever is a **baseline profile**, which this fork has not attempted.
+
+---
+
+## Theme: menus and dialogs come from `MaterialTheme`, not from you
+
+Every surface the app draws itself is dark. `DropdownMenu` and `Dialog` are not
+drawn by the app — Compose renders their container from the ambient theme — so on
+a stock `MaterialTheme` they arrived in the **default light palette** on top of a
+dark dashboard, which is the single most jarring thing a user can be shown.
+
+The app now wraps its content in its own dark theme. Three things are worth
+knowing if you retheme it:
+
+- Setting `surface` alone is not enough on Material3 1.3. Menus read
+  **`surfaceContainer`**, which is a separate token.
+- **`surfaceTint` composites an elevation overlay** on top of whatever colour you
+  set, so it has to go to `Transparent` or your colour lands slightly wrong and
+  you will chase it in the wrong place.
+- Menu corner radius comes from **`shapes.extraSmall`**, not from any parameter
+  on `DropdownMenu`.
+
+## Press feedback on controls that answer late
+
+Compose drops a control's pressed state the instant the finger lifts. On a
+control whose entity answers half a second later — a media player over the
+network, a thermostat over HomeKit, a shade over RF — that reads as a press that
+did not register, so people press again, and the second press often undoes the
+first.
+
+`PressFeedback` holds the highlight for a floor duration regardless of how
+briefly the touch lasted. It is applied to the button grid, shade, climate, media
+and tile cards: every control here that drives something slower than the UI.
+
+## `media_player`: metadata has a shelf life
+
+A player that has been idle for days keeps its last title in its state machine,
+so a card will cheerfully caption it as though it were current — "now playing"
+last week's episode. `stale_after_minutes` (default 360) treats metadata older
+than that as absent.
+
+Parse Home Assistant's timestamps with **`OffsetDateTime`**, not `Instant.parse`.
+HA emits offsets as `+00:00`; `Instant.parse` insists on a trailing `Z` and
+throws on that form. Wrapped in a `runCatching`, as it was here, that silently
+disabled the entire check while looking like it worked.
+
+## Motion wake, per remote
+
+The remote can wake on movement rather than on a button. That assumes it rests on
+something still — which is wrong for a remote that lives in a bed, where a fixed
+threshold re-lit the display within seconds of every timeout, all night.
+
+`motion_wake:` is configurable per remote through a `devices:` map keyed by the
+app's own device slug, so one layout can serve a coffee table and a nightstand.
+Hits are counted inside a rolling **window** rather than consecutively: real
+movement is not monotonic, and strict consecutiveness meant even a hard flick
+failed to register. Sampling is `SENSOR_DELAY_UI`, so a one-second window holds
+roughly 16 samples instead of 5.
+
+## One layout, a different start page per remote
+
+Several remotes can share a single layout while opening on their own room. The
+config server keys the start page off the requesting client, and a page may carry
+its own `overlay:` block instead of only the global one.
+
+If you add page-scoped config of this kind, remember to teach the entity
+collector about it. `EntityRefs.collect()` walked only the global overlay, so an
+entity referenced solely by a per-page overlay was never subscribed and its state
+stayed null forever — a feature that silently could not fire.
+
+## Nothing may be sent before `auth_ok`
+
+Home Assistant's websocket accepts exactly one kind of first message. Send a
+`call_service` in the window between `onOpen` and `auth_ok` and HA answers
+`Auth message incorrectly formatted: extra keys not allowed @ data['domain']`
+and closes the socket — it does not skip the stray frame and carry on. So an
+early send does not merely arrive early, it **poisons the handshake**, and the
+app lands in `AUTH_FAILED` holding a perfectly valid token.
+
+This is easy to hit in practice: a card that writes on startup, racing a
+reconnect after an HA restart. `send()` therefore queues while unauthenticated
+and flushes after `subscribe()`. The queue is bounded and drops oldest — a socket
+that stays down must not replay a minute of stale commands at a thermostat when
+it finally comes back.
+
+`AUTH_FAILED` also retries, once a minute, rather than being terminal. A rejected
+token will be rejected again, so giving up looks reasonable — but "auth failed"
+is equally what the app reports when the handshake is merely disturbed, and a
+wall-mounted remote that has to be relaunched by hand is the worst possible place
+to be permanently wrong about it.

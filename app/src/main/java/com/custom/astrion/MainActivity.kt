@@ -78,15 +78,9 @@ class MainActivity : ComponentActivity() {
         // Hold this long for a button's long-press action to fire.
         const val LONG_PRESS_MS = 1500L
 
-        // Motion-wake tuning: accel magnitude delta (m/s²) that counts as
-        // "moved", and a cooldown so a single lift fires one wake.
-        const val MOTION_THRESHOLD = 0.9f
-        const val WAKE_COOLDOWN_MS = 2000L
-
-        // Ignore motion for this long after the display turns off -- long enough
-        // to cover setting the remote down, short enough that deliberately
-        // picking it back up still feels immediate.
-        const val MOTION_SETTLE_MS = 6000L
+        // Motion-wake tuning moved to MotionWakeConfig (dashboard.yaml
+        // `motion_wake:`, with per-remote blocks) -- the fixed values here could
+        // not serve both a remote on a side table and two that live in a bed.
     }
 
     // Long-press timing state.
@@ -101,17 +95,52 @@ class MainActivity : ComponentActivity() {
     private var motionSensor: Sensor? = null
     private var lastMagnitude = 0f
     private var lastWakeMs = 0L
+    /** Above-threshold samples seen inside the current window. */
+    private var motionHits = 0
+    /** When the current counting window started. */
+    private var motionWindowStart = 0L
     private val motionListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
+            val cfg = motionCfg()
+            if (!cfg.enabled) return
             val (x, y, z) = event.values
             val mag = sqrt(x * x + y * y + z * z)
-            if (lastMagnitude != 0f && abs(mag - lastMagnitude) > MOTION_THRESHOLD) {
-                wakeScreen()
+            if (lastMagnitude != 0f) {
+                // Count hits inside a rolling WINDOW, not consecutively.
+                //
+                // Strictly-consecutive counting looked right and was unusable:
+                // real movement is not monotonic. Flicking the remote hard
+                // produces a burst of large deltas with small ones interleaved as
+                // the acceleration reverses, so a single quiet sample between two
+                // violent ones reset the run and the screen never lit -- the
+                // remote could be shaken and stay dark. Requiring N hits within a
+                // window tolerates those dips while still rejecting an isolated
+                // jolt, which is the actual thing being filtered out.
+                val now = SystemClock.elapsedRealtime()
+                if (now - motionWindowStart > cfg.windowMs) {
+                    motionWindowStart = now
+                    motionHits = 0
+                }
+                if (abs(mag - lastMagnitude) > cfg.threshold) {
+                    motionHits++
+                    if (motionHits >= cfg.hits) {
+                        motionHits = 0
+                        motionWindowStart = now
+                        wakeScreen()
+                    }
+                }
             }
             lastMagnitude = mag
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
+
+    /**
+     * This remote's effective motion-wake settings, read from the LIVE config so
+     * a Sync re-tunes it without a restart. Only `enabled` needs a restart, since
+     * that decides whether the sensor is registered at all.
+     */
+    private fun motionCfg() = dashboard.config.motionWake.forDevice(deviceName)
 
     private lateinit var client: HaClient
     /** When the display last turned on, for telling a waking press from a normal one. */
@@ -903,7 +932,39 @@ class MainActivity : ComponentActivity() {
 
     // ---- motion wake --------------------------------------------------------
 
+    /**
+     * Opt-out flag for motion wake, same file-flag pattern as `allow-stock`.
+     *
+     * Motion wake assumes the remote rests on something that does not move —
+     * a table, an arm of a sofa. A remote that lives IN A BED breaks that
+     * assumption completely: the surface moves whenever its owner does, easily
+     * past the 0.9 m/s² threshold, so the display re-lit within seconds of every
+     * timeout, all night. Raising the threshold does not rescue it, because a
+     * person rolling over produces more acceleration than picking the remote up.
+     *
+     * So it is switchable per unit rather than tuned. Create the file to disable:
+     *   adb shell touch /data/user_de/0/com.custom.astrion/no-motion-wake
+     * Delete it to restore. Read once at startup — this changes what sensors are
+     * registered, so it takes an app restart, which the adb command implies anyway.
+     */
+    private val noMotionWakeFile by lazy {
+        java.io.File(createDeviceProtectedStorageContext().dataDir, "no-motion-wake")
+    }
+
     private fun setupMotionWake() {
+        if (noMotionWakeFile.exists()) {
+            Log.i(KEY_TAG, "motion wake disabled by no-motion-wake flag")
+            return
+        }
+        if (!motionCfg().enabled) {
+            Log.i(KEY_TAG, "motion wake disabled by config for device=$deviceName")
+            return
+        }
+        // Deliberately NOT logging the resolved values here: setup runs before
+        // the dashboard has loaded, so it would print the compiled defaults and
+        // read as "the per-device config did not apply". The real values are
+        // logged at the first wake, by which time the config is live.
+        Log.i(KEY_TAG, "motion wake armed (device=$deviceName)")
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         // Prefer a wake-up accelerometer so events still arrive with the screen
         // off; fall back to the normal one (which only helps while awake).
@@ -911,7 +972,10 @@ class MainActivity : ComponentActivity() {
             ?.firstOrNull { it.isWakeUpSensor }
             ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         motionSensor?.let {
-            sensorManager?.registerListener(motionListener, it, SensorManager.SENSOR_DELAY_NORMAL)
+            // UI rate (~60ms), not NORMAL (~200ms). A 1-second window holds ~16
+            // samples instead of ~5, which is what makes "N hits in a window"
+            // able to tell a flick from a bump at all.
+            sensorManager?.registerListener(motionListener, it, SensorManager.SENSOR_DELAY_UI)
         }
     }
 
@@ -924,9 +988,11 @@ class MainActivity : ComponentActivity() {
         // the display lights again within a second or two of sleeping, over and
         // over, which is both maddening and the opposite of the battery saving
         // the timeout exists for.
-        if (SystemClock.elapsedRealtime() - screenOffAt < MOTION_SETTLE_MS) return
+        val cfg = motionCfg()
+        Log.i(KEY_TAG, "motion wake fired: $cfg (device=$deviceName)")
+        if (SystemClock.elapsedRealtime() - screenOffAt < cfg.settleSeconds * 1000L) return
         val now = System.currentTimeMillis()
-        if (now - lastWakeMs < WAKE_COOLDOWN_MS) return
+        if (now - lastWakeMs < cfg.cooldownSeconds * 1000L) return
         lastWakeMs = now
         @Suppress("DEPRECATION")
         val wl = pm.newWakeLock(

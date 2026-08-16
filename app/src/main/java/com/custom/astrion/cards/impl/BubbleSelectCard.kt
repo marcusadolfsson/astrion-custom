@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Blinds
 import androidx.compose.material.icons.filled.BrightnessMedium
@@ -285,6 +286,7 @@ object CardIcons {
         "thermostat", "climate", "ac", "temp" -> Icons.Filled.Thermostat
         "remote" -> Icons.Filled.SettingsRemote
         "bed", "sleep", "position" -> Icons.Filled.KingBed
+        "fan", "air", "ceiling-fan" -> Icons.Filled.Air
         else -> Icons.Filled.Tune
     }
 }

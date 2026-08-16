@@ -40,7 +40,58 @@ data class AppConfig(
      * behaviour for a device with no helper of its own.
      */
     val pageEntity: String? = null,
+    /** Motion-wake tuning; see [MotionWakeConfig]. Absent means built-in defaults. */
+    val motionWake: MotionWakeConfig = MotionWakeConfig(),
 )
+
+/**
+ * Motion wake: light the screen when the remote is picked up.
+ *
+ * Tunable, and tunable PER REMOTE, because the assumption underneath it is not
+ * universal. It assumes the remote rests on something still. Two of these live
+ * in a bed, where the surface moves whenever its owner does — at the original
+ * fixed 0.9 m/s² that re-lit the display within seconds of every timeout, all
+ * night. The living-room unit on a side table has no such problem, so one set of
+ * numbers cannot serve both.
+ *
+ * [hits] is the part that actually separates the two cases. Amplitude alone does
+ * not: rolling over can outweigh a gentle pick-up. But a pick-up is SUSTAINED —
+ * the remote keeps moving while it travels to your hand — where a bed jolt is
+ * one spike and over. Requiring several consecutive samples above [threshold]
+ * discriminates on duration rather than force.
+ */
+data class MotionWakeConfig(
+    /** Off entirely. The `no-motion-wake` file flag also forces this off. */
+    val enabled: Boolean = true,
+    /** Accel magnitude delta (m/s²) counting as movement. */
+    val threshold: Float = 2.0f,
+    /** Consecutive samples above [threshold] before the screen lights. */
+    val hits: Int = 2,
+    /** Ignore motion for this long after the display turns off. */
+    val settleSeconds: Int = 8,
+    /** Minimum gap between two wakes. */
+    val cooldownSeconds: Int = 2,
+    /**
+     * Rolling window the [hits] must land inside.
+     *
+     * Hits are counted per-window rather than consecutively because real
+     * movement is not monotonic: a hard flick produces large deltas with small
+     * ones interleaved as the acceleration reverses, and strict consecutiveness
+     * made even a violent shake fail to register.
+     */
+    val windowMs: Long = 1200,
+    /** Per-remote overrides, keyed by the `device` slug in ConnectionConfig. */
+    val devices: Map<String, MotionWakeConfig> = emptyMap(),
+) {
+    /**
+     * This remote's effective settings: its own block if it has one, else the
+     * global values. A device block is a whole-value override for the same
+     * reason a page's overlay is — threshold and hits are tuned together, and
+     * inheriting one while overriding the other gives a combination nobody chose.
+     */
+    fun forDevice(device: String): MotionWakeConfig =
+        devices[device]?.copy(devices = emptyMap()) ?: copy(devices = emptyMap())
+}
 
 /** The full-screen Status view: a title and the same cards any page can hold. */
 data class StatusConfig(
@@ -179,6 +230,17 @@ data class PageConfig(
     val longHotkeys: List<HotkeyConfig> = emptyList(),
     /** Page-scoped VOICE overrides; unset fields inherit the global `voice:`. */
     val voice: PageVoiceConfig? = null,
+    /**
+     * Page-scoped volume/mute OSD. WHOLE-VALUE override, not a field merge like
+     * [voice]: an overlay names a speaker, its instant-feedback cache and the
+     * gate that decides when announcing is appropriate, and those three only
+     * make sense together. Inheriting two of them from another room would
+     * announce the wrong speaker's volume, which is exactly the bug this fixes.
+     *
+     * Unset means the global `overlay:` applies, so rooms that share the Living
+     * Room's speaker need no config at all.
+     */
+    val overlay: OverlayConfig? = null,
 )
 
 /**

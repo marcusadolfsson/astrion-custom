@@ -248,7 +248,14 @@ fun Dashboard(
             )
         }
 
-        config.overlay?.let { VolumeOverlay(it, ctx) }
+        // Page-effective, for the same reason the voice config below is: the
+        // volume keys are page-scoped, so on the bedroom page they move the
+        // BEDROOM speaker, and an OSD wired to the living room would either stay
+        // silent or announce the wrong room. A page without its own block keeps
+        // the global one, so rooms sharing the main speaker need no config.
+        val overlayCfg = config.pages.getOrNull(pagerState.currentPage)?.overlay
+            ?: config.overlay
+        overlayCfg?.let { VolumeOverlay(it, ctx) }
 
         // Prompts are gated on an entity so they can be specific to what is on
         // (movie searches in front of the Kaleidescape, nothing elsewhere). No

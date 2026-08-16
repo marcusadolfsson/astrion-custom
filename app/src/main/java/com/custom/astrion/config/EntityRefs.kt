@@ -29,7 +29,15 @@ object EntityRefs {
         }
         // The overlay reads these outside any card, so collect them explicitly —
         // otherwise the filtered subscription would never deliver their updates.
-        config.overlay?.let { o ->
+        //
+        // EVERY overlay, global and page-scoped alike. A page's overlay names a
+        // different room's speaker, cache and gate, and none of those appear on
+        // any card — so leaving them out subscribed the app to nothing it needed
+        // and the bedroom OSD could never fire: the volume it watched was
+        // permanently null, so it never saw a change. Collected for every page
+        // regardless of which one is showing, because the subscription is set up
+        // once at connect and the user can swipe at any time.
+        (listOfNotNull(config.overlay) + config.pages.mapNotNull { it.overlay }).forEach { o ->
             listOfNotNull(o.volumeEntity, o.muteEntity).forEach {
                 if (ENTITY_ID.matches(it)) out.add(it)
             }

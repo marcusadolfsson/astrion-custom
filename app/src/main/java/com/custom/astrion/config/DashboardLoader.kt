@@ -122,23 +122,16 @@ object DashboardLoader {
                         voice = (obj["voice"] as? JsonObject)?.let { v ->
                             PageVoiceConfig(path = (v["path"] as? JsonPrimitive)?.content)
                         },
+                        // Same parser as the global overlay below, so a page's
+                        // block takes exactly the same keys.
+                        overlay = parseOverlay(obj["overlay"] as? JsonObject),
                     )
                 }
                 if (pages.isEmpty()) error("\"pages\" is empty")
                 val start = (root["startPage"] as? JsonPrimitive)?.intOrNull ?: 0
                 val hotkeys = (root["hotkeys"] as? JsonArray)?.map { parseHotkey(it as JsonObject) } ?: emptyList()
                 val longHotkeys = (root["longHotkeys"] as? JsonArray)?.map { parseHotkey(it as JsonObject) } ?: emptyList()
-                val overlay = (root["overlay"] as? JsonObject)?.let { o ->
-                    OverlayConfig(
-                        volumeEntity = (o["volume_entity"] as? JsonPrimitive)?.content,
-                        muteEntity = (o["mute_entity"] as? JsonPrimitive)?.content,
-                        // Carried as a CardConfig purely so ConditionalCard.matches
-                        // can evaluate it unchanged; the type string is unused.
-                        condition = (o["condition"] as? JsonObject)?.let { c ->
-                            CardConfig("condition", c.entries.associate { (k, v) -> k to JsonPlain.toPlain(v) })
-                        },
-                    )
-                }
+                val overlay = parseOverlay(root["overlay"] as? JsonObject)
                 val gestures = (root["gestures"] as? JsonObject)?.let { g ->
                     GesturesConfig(
                         swipeDown = (g["swipe_down"] as? JsonObject)?.let { s ->
@@ -184,6 +177,7 @@ object DashboardLoader {
                 AppConfig(
                     pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys,
                     overlay, voice, gestures, status, pageEntity,
+                    parseMotionWake(root["motion_wake"] as? JsonObject),
                 )
             }
             else -> error("top level must be an object or array")
@@ -197,6 +191,49 @@ object DashboardLoader {
             ?.entries?.associate { (k, v) -> k to JsonPlain.toPlain(v) }
             ?: emptyMap()
         return CardConfig(type, options)
+    }
+
+    /**
+     * Volume/mute OSD config. Shared by the global `overlay:` and a page's own,
+     * so the two accept identical keys — a page block is a whole-value override,
+     * not a merge (see [PageConfig.overlay]).
+     */
+    private fun parseOverlay(o: JsonObject?): OverlayConfig? = o?.let {
+        OverlayConfig(
+            volumeEntity = (it["volume_entity"] as? JsonPrimitive)?.content,
+            muteEntity = (it["mute_entity"] as? JsonPrimitive)?.content,
+            // Carried as a CardConfig purely so ConditionalCard.matches can
+            // evaluate it unchanged; the type string is unused.
+            condition = (it["condition"] as? JsonObject)?.let { c ->
+                CardConfig("condition", c.entries.associate { (k, v) -> k to JsonPlain.toPlain(v) })
+            },
+        )
+    }
+
+    /**
+     * Motion-wake tuning, with optional per-remote blocks under `devices:` keyed
+     * by the ConnectionConfig `device` slug. A device block is parsed with the
+     * same reader, so it takes the same keys; nested `devices` inside one is
+     * ignored by [MotionWakeConfig.forDevice].
+     */
+    private fun parseMotionWake(o: JsonObject?): MotionWakeConfig {
+        val d = MotionWakeConfig()
+        if (o == null) return d
+        fun one(j: JsonObject, base: MotionWakeConfig) = MotionWakeConfig(
+            enabled = (j["enabled"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: base.enabled,
+            threshold = (j["threshold"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.threshold,
+            hits = (j["hits"] as? JsonPrimitive)?.content?.toIntOrNull() ?: base.hits,
+            settleSeconds = (j["settle_seconds"] as? JsonPrimitive)?.content?.toIntOrNull() ?: base.settleSeconds,
+            cooldownSeconds = (j["cooldown_seconds"] as? JsonPrimitive)?.content?.toIntOrNull() ?: base.cooldownSeconds,
+            windowMs = (j["window_ms"] as? JsonPrimitive)?.content?.toLongOrNull() ?: base.windowMs,
+        )
+        val global = one(o, d)
+        val devices = (o["devices"] as? JsonObject)?.entries?.associate { (k, v) ->
+            // Device blocks inherit the GLOBAL values for anything they omit, so
+            // a block that only raises `threshold` keeps the shared settle window.
+            k to ((v as? JsonObject)?.let { one(it, global) } ?: global)
+        } ?: emptyMap()
+        return global.copy(devices = devices)
     }
 
     private fun parseHotkey(obj: JsonObject): HotkeyConfig {

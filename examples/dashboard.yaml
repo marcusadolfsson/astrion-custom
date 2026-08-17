@@ -852,30 +852,63 @@ voice:
 # without a reinstall. Only `enabled` needs a restart (it decides whether the
 # sensor is registered at all).
 motion_wake:
-  threshold: 2.0
+  # Rewritten 2026-08-17 to detect a PICK-UP rather than a jolt.
+  #
+  # The old test was the change in the acceleration vector's MAGNITUDE. That
+  # responds to a knock -- someone shifting on a mattress -- but is nearly blind
+  # to the thing actually worth waking for: lifting a remote rotates it, and
+  # rotation leaves the magnitude at ~1 g while only the axis components move. So
+  # there was no threshold that both woke on a pick-up and ignored a bed, and
+  # every retune traded one against the other.
+  #
+  # It now watches the DIRECTION of the low-passed gravity vector and fires on a
+  # tilt of `tilt_degrees`, with `jerk_ratio` kept for a deliberate shake that
+  # does not turn the remote. Both are scale-free, which matters more than it
+  # sounds: master_2's accelerometer reads ~2x true (18.9 m/s2 at rest against
+  # 9.6 on its twin), so the same `threshold` number used to mean half as much on
+  # that unit as on the others. Angles and ratios finally mean the same thing on
+  # every remote.
+  tilt_degrees: 10
+  jerk_ratio: 0.25
   hits: 2
   settle_seconds: 8
   cooldown_seconds: 2
+  # A docked remote is never woken by movement -- it is sitting still, and the
+  # hand that reaches for it will press something.
+  ignore_while_charging: true
   devices:
-    # Strictest of the three: in a bed, and the pair that reported the problem.
-    # Loosened 2026-08-16: 3.5/4 was unusable -- flicking the remote hard did not
-    # wake it. Two reasons, and the second was the real one. Four hits had to be
-    # CONSECUTIVE, and a hard flick interleaves small deltas as the acceleration
-    # reverses, so the run kept resetting; hits are now counted inside a window
-    # instead. And the sampling was ~200 ms, so four hits meant nearly a second of
-    # unbroken violence. Still above the global values, because these two sit on a
-    # bed and a single body-shift must not qualify.
+    # The bed pair. A body-shift translates the remote without turning it, so the
+    # tilt gate does most of the work here and these can now sit close to the
+    # global values instead of being cranked until a real pick-up failed too.
     master_1:
-      threshold: 2.5
+      tilt_degrees: 14
       hits: 2
       window_ms: 1000
       settle_seconds: 10
     master_2:
-      threshold: 2.5
+      tilt_degrees: 14
       hits: 2
       window_ms: 1000
       settle_seconds: 10
     # living inherits the global values -- a side table does not move on its own.
+
+# Docked remotes stay awake as a dim status panel instead of sleeping: the dock
+# supplies mains power, so the timeout saves nothing there. Any touch or button
+# raises the backlight for `bright_seconds`, then it fades back.
+dock_display:
+  enabled: true
+  dim_level: 0.02
+  bright_level: 0.6
+  bright_seconds: 20
+  devices:
+    # Bedroom pair: dimmer still, and back down sooner. This is a light source
+    # aimed at a bed for most of the night.
+    master_1:
+      dim_level: 0.01
+      bright_seconds: 15
+    master_2:
+      dim_level: 0.01
+      bright_seconds: 15
 
 overlay:
   # Transient volume/mute OSD on the remote. volume_entity is the CACHE the

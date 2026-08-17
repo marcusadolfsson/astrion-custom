@@ -857,16 +857,82 @@ disabled the entire check while looking like it worked.
 
 ## Motion wake, per remote
 
-The remote can wake on movement rather than on a button. That assumes it rests on
-something still — which is wrong for a remote that lives in a bed, where a fixed
-threshold re-lit the display within seconds of every timeout, all night.
+The remote can wake on movement rather than on a button. That assumes it rests
+on something still — which is wrong for a remote that lives in a bed.
 
-`motion_wake:` is configurable per remote through a `devices:` map keyed by the
-app's own device slug, so one layout can serve a coffee table and a nightstand.
+**Detect the pick-up, not the knock.** The obvious implementation watches the
+change in the acceleration vector's *magnitude*, and it does not work: lifting a
+remote ROTATES it, and rotation leaves the magnitude at ~1 g while only the axis
+components move. Magnitude therefore responds to a jolt — someone shifting on a
+mattress — and is nearly blind to the gesture you actually care about, so no
+threshold satisfies both "wakes in my hand" and "does not wake all night".
+
+This fork low-passes the vector into a gravity estimate and fires on the **angle**
+between it and the direction the remote has been resting at — the standard
+inclinometer treatment, see [ST DT0140](https://www.st.com/resource/en/design_tip/dt0140-tilt-computation-using-accelerometer-data-for-inclinometer-applications-stmicroelectronics.pdf)
+and [ADI AN-1057](https://www.analog.com/en/resources/app-notes/an-1057.html);
+the low-pass matters because tilt sensing assumes gravity is the only
+acceleration present, which is false during the movement being detected. A jerk
+term survives for a deliberate shake. The resting reference is re-adopted once
+the angle settles, so setting the remote down at a new attitude does not leave it
+one degree from firing.
+
+```yaml
+motion_wake:
+  tilt_degrees: 10        # degrees of rotation that count as a pick-up
+  jerk_ratio: 0.25        # sudden movement, as a fraction of this unit's own 1 g
+  hits: 2
+  window_ms: 1200
+  settle_seconds: 8
+  ignore_while_charging: true
+  devices:
+    nightstand: { tilt_degrees: 14, settle_seconds: 10 }
+```
+
+Both thresholds are **scale-free**, which is worth more than it sounds. One of
+these remotes reports ~2× true acceleration — 18.9 m/s² at rest against 9.6 on an
+identical unit, with x and y agreeing, so a plain range/scale fault. A threshold
+in m/s² silently means half as much on that unit as on its twin, and tuning the
+pair against each other never converges. Normalising cancels it: an angle is an
+angle on any sensor.
+
+`ignore_while_charging` skips motion wake entirely while docked. A remote on
+power is sitting still by definition, and the hand reaching for it will press
+something.
+
 Hits are counted inside a rolling **window** rather than consecutively: real
 movement is not monotonic, and strict consecutiveness meant even a hard flick
-failed to register. Sampling is `SENSOR_DELAY_UI`, so a one-second window holds
-roughly 16 samples instead of 5.
+failed to register. Sampling is `SENSOR_DELAY_UI`.
+
+## Dock display: a docked remote is a panel, not a sleeping phone
+
+A dock supplies mains power, so letting the screen time out there saves nothing
+and makes the remote useless to glance at. While charging, the display is held on
+at the lowest readable backlight; any touch or button raises it for
+`bright_seconds` and it fades back.
+
+```yaml
+dock_display:
+  enabled: true
+  dim_level: 0.02         # 0..1, idle on the dock
+  bright_level: 0.6       # 0..1, after a touch
+  bright_seconds: 20
+  devices:
+    nightstand: { dim_level: 0.01, bright_seconds: 15 }
+```
+
+Implemented with `FLAG_KEEP_SCREEN_ON` and a **window** brightness override
+rather than a wake lock and the system brightness setting. Both are scoped to the
+window, so neither can outlive the activity and strand a remote at full
+brightness — which on a device whose only recovery is a USB cable is the failure
+mode that matters.
+
+Two ordering traps if you reimplement this. Apply it **after** the layout
+reload, or the first resume following an update decides using the previous
+config — and for a newly added setting that means deciding it is absent and never
+revisiting, because a screen that sleeps produces no second `onResume`. And an
+activity that was already resumed when the display slept never gets another
+`onResume` at all, so re-establish the mode on `ACTION_SCREEN_ON` as well.
 
 ## One layout, a different start page per remote
 

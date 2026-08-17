@@ -12,10 +12,13 @@ import android.os.Handler
 import android.os.Looper
 import android.content.BroadcastReceiver
 import android.content.Intent
+import android.os.BatteryManager
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.WindowManager
 import android.widget.Toast
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -78,6 +81,17 @@ class MainActivity : ComponentActivity() {
         // Hold this long for a button's long-press action to fire.
         const val LONG_PRESS_MS = 1500L
 
+        /**
+         * Smoothing factor for the gravity estimate, 0..1 (higher = faster).
+         *
+         * Tilt sensing assumes gravity is the only acceleration present, which is
+         * false during exactly the movement being detected, so the vector is
+         * low-passed before its direction is used. 0.15 at ~15 Hz settles in a
+         * few hundred milliseconds: quick enough to follow the remote being set
+         * back down, slow enough that one jolt barely moves it.
+         */
+        const val GRAVITY_LPF = 0.15f
+
         // Motion-wake tuning moved to MotionWakeConfig (dashboard.yaml
         // `motion_wake:`, with per-remote blocks) -- the fixed values here could
         // not serve both a remote on a side table and two that live in a bed.
@@ -99,38 +113,84 @@ class MainActivity : ComponentActivity() {
     private var motionHits = 0
     /** When the current counting window started. */
     private var motionWindowStart = 0L
+    /**
+     * Low-passed gravity estimate, and the reference direction to compare against.
+     *
+     * Tilt sensing assumes the only acceleration present is gravity, which is
+     * exactly false during the movement being detected -- so the raw vector is
+     * smoothed into a gravity estimate first, the standard treatment in the
+     * accelerometer-inclinometer literature (ST DT0140, ADI AN-1057). The
+     * reference is the direction the remote has been resting at; a pick-up is
+     * then simply the angle between the two opening up.
+     */
+    private var gx = 0f
+    private var gy = 0f
+    private var gz = 0f
+    private var refX = 0f
+    private var refY = 0f
+    private var refZ = 0f
+
     private val motionListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
             val cfg = motionCfg()
             if (!cfg.enabled) return
             val (x, y, z) = event.values
             val mag = sqrt(x * x + y * y + z * z)
-            if (lastMagnitude != 0f) {
-                // Count hits inside a rolling WINDOW, not consecutively.
-                //
-                // Strictly-consecutive counting looked right and was unusable:
-                // real movement is not monotonic. Flicking the remote hard
-                // produces a burst of large deltas with small ones interleaved as
-                // the acceleration reverses, so a single quiet sample between two
-                // violent ones reset the run and the screen never lit -- the
-                // remote could be shaken and stay dark. Requiring N hits within a
-                // window tolerates those dips while still rejecting an isolated
-                // jolt, which is the actual thing being filtered out.
-                val now = SystemClock.elapsedRealtime()
-                if (now - motionWindowStart > cfg.windowMs) {
-                    motionWindowStart = now
-                    motionHits = 0
-                }
-                if (abs(mag - lastMagnitude) > cfg.threshold) {
-                    motionHits++
-                    if (motionHits >= cfg.hits) {
-                        motionHits = 0
-                        motionWindowStart = now
-                        wakeScreen()
-                    }
-                }
+            if (mag < 0.001f) return
+
+            // Seed on the first sample rather than treating it as movement.
+            if (gx == 0f && gy == 0f && gz == 0f) {
+                gx = x; gy = y; gz = z
+                refX = x; refY = y; refZ = z
+                lastMagnitude = mag
+                return
             }
+
+            // Smooth towards the current reading. At ~15 Hz this settles in a
+            // couple of hundred ms -- fast enough to follow a real re-placement,
+            // slow enough that a single jolt does not move the estimate far.
+            gx += (x - gx) * GRAVITY_LPF
+            gy += (y - gy) * GRAVITY_LPF
+            gz += (z - gz) * GRAVITY_LPF
+
+            val gMag = sqrt(gx * gx + gy * gy + gz * gz)
+            val refMag = sqrt(refX * refX + refY * refY + refZ * refZ)
+            if (gMag < 0.001f || refMag < 0.001f) return
+
+            // Angle between the current gravity direction and the resting one.
+            // Both sides are normalised, so a sensor reading twice true scale --
+            // as one of these remotes does -- gives the same angle as a healthy
+            // one. That is the whole reason this is an angle and not a delta.
+            val cos = ((gx * refX + gy * refY + gz * refZ) / (gMag * refMag))
+                .coerceIn(-1f, 1f)
+            val tiltDeg = Math.toDegrees(kotlin.math.acos(cos).toDouble()).toFloat()
+
+            // Sudden movement, as a fraction of THIS device's own resting
+            // gravity -- again scale-free. Catches a deliberate shake that does
+            // not turn the remote.
+            val jerk = abs(mag - lastMagnitude) / gMag
             lastMagnitude = mag
+
+            val now = SystemClock.elapsedRealtime()
+            if (now - motionWindowStart > cfg.windowMs) {
+                motionWindowStart = now
+                motionHits = 0
+            }
+            if (tiltDeg > cfg.tiltDegrees || jerk > cfg.jerkRatio) {
+                motionHits++
+                if (motionHits >= cfg.hits) {
+                    motionHits = 0
+                    motionWindowStart = now
+                    Log.i(KEY_TAG, "motion: tilt=%.1f° jerk=%.2f (device=%s)"
+                        .format(tiltDeg, jerk, deviceName))
+                    wakeScreen()
+                }
+            } else if (tiltDeg < cfg.tiltDegrees / 2f) {
+                // Settled at a new attitude: adopt it as the reference, so being
+                // set down at a different angle does not leave the remote one
+                // degree from firing for the rest of the night.
+                refX = gx; refY = gy; refZ = gz
+            }
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
@@ -149,13 +209,96 @@ class MainActivity : ComponentActivity() {
     /** When the display last turned off, for the motion-wake settle window. */
     @Volatile private var screenOffAt = 0L
 
+    /** True while the remote is on power. Drives both dock display and the
+     *  motion-wake charging gate; kept as state so neither has to poll. */
+    @Volatile private var charging = false
+
+    private fun dockCfg() = dashboard.config.dockDisplay.forDevice(deviceName)
+
     private val screenWatcher = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
             when (i?.action) {
-                Intent.ACTION_SCREEN_ON -> screenOnAt = SystemClock.elapsedRealtime()
+                Intent.ACTION_SCREEN_ON -> {
+                    screenOnAt = SystemClock.elapsedRealtime()
+                    // Re-apply here as well as on resume. An activity that was
+                    // already resumed when the display slept never gets a second
+                    // onResume, so a remote whose first resume happened with the
+                    // screen off would sit in the wrong mode indefinitely --
+                    // observed on the living-room unit. The screen coming on is
+                    // also interaction, so it brightens.
+                    noteDockInteraction()
+                }
                 Intent.ACTION_SCREEN_OFF -> screenOffAt = SystemClock.elapsedRealtime()
+                Intent.ACTION_POWER_CONNECTED -> { charging = true; applyDockDisplay() }
+                Intent.ACTION_POWER_DISCONNECTED -> { charging = false; applyDockDisplay() }
             }
         }
+    }
+
+    /**
+     * Hold the screen on, dim, while docked -- and let go when undocked.
+     *
+     * FLAG_KEEP_SCREEN_ON rather than a wake lock: it is scoped to this window,
+     * so it cannot outlive the activity and leave the display stuck on, which is
+     * the failure mode that matters on a device whose only recovery is a cable.
+     *
+     * screenBrightness is a WINDOW attribute, so it overrides the system level
+     * only while this window is in front and reverts on its own afterwards --
+     * nothing to restore, and nothing left behind if the app dies.
+     */
+    private fun applyDockDisplay(bright: Boolean = false) {
+        val cfg = dockCfg()
+        val on = cfg.enabled && charging
+        runOnUiThread {
+            if (on) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+            window.attributes = window.attributes.apply {
+                screenBrightness = when {
+                    !on -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    bright -> cfg.brightLevel.coerceIn(0.01f, 1f)
+                    else -> cfg.dimLevel.coerceIn(0.01f, 1f)
+                }
+            }
+        }
+    }
+
+    /**
+     * Any interaction while docked raises the backlight for a while.
+     *
+     * Called from the touch and key paths rather than from a global listener,
+     * because "the user did something" is exactly what those already know and a
+     * separate watcher would have to re-derive it.
+     */
+    private fun noteDockInteraction() {
+        // Re-read power state here rather than trusting the cached flag: the
+        // connect broadcast can be missed while the app is stopped, and this is
+        // the cheap moment to notice.
+        charging = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            ?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)?.let { it != 0 } ?: charging
+        if (!charging || !dockCfg().enabled) {
+            applyDockDisplay()
+            return
+        }
+        applyDockDisplay(bright = true)
+        keyHandler.removeCallbacks(dockDimBack)
+        keyHandler.postDelayed(dockDimBack, dockCfg().brightSeconds * 1000L)
+    }
+
+    /**
+     * Fade back to the dim level.
+     *
+     * Deliberately does NOT re-check a deadline. It used to compare against
+     * `dockBrightUntil`, computed a few instructions before the timer was posted
+     * for the same duration -- so the two could land in either order, and when
+     * the check lost the race nothing rescheduled and the backlight stayed at
+     * full all night. removeCallbacks already guarantees this only runs when no
+     * newer interaction has replaced it, which is the whole condition.
+     */
+    private val dockDimBack = Runnable {
+        if (charging && dockCfg().enabled) applyDockDisplay(bright = false)
     }
 
     private val keyRouter = HardwareKeyRouter()
@@ -563,6 +706,8 @@ class MainActivity : ComponentActivity() {
             IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_POWER_CONNECTED)
+                addAction(Intent.ACTION_POWER_DISCONNECTED)
             },
         )
         bridge.start()
@@ -670,17 +815,36 @@ class MainActivity : ComponentActivity() {
         setupUrl = null
     }
 
+    /** Any touch counts as interaction for the dock's brightness. */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        noteDockInteraction()
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onResume() {
         super.onResume()
+        // Read the CURRENT power state rather than waiting for the next
+        // connect/disconnect broadcast -- otherwise a remote that was already on
+        // charge when the app started would sit in the wrong mode until someone
+        // unplugged it.
+        charging = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            ?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)?.let { it != 0 } ?: false
         // Re-read the local cache on foreground (instant, no network). Pulling
         // from HA is now on-demand — swipe up for the info panel's Sync button,
         // or the VOICE hotkey — not on every resume.
         reloadDashboard()
+        // AFTER the reload, not before: applyDockDisplay reads the live config,
+        // and running it first meant the first resume after an update decided
+        // using the PREVIOUS layout -- which, for a setting that had just been
+        // added, meant deciding it was absent and then never revisiting it,
+        // because a screen that goes to sleep produces no second resume.
+        applyDockDisplay()
     }
 
     /** Load config from the local cache and apply it. Synchronous — tiny file. */
     private fun reloadDashboard() {
         applyDashboard(DashboardLoader.load())
+        applyDockDisplay()
     }
 
     /**
@@ -863,6 +1027,9 @@ class MainActivity : ComponentActivity() {
      *    etc. still repeat while held).
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // A button press is interaction too -- the dock brightens for it
+        // exactly as it does for a touch.
+        if (event.action == KeyEvent.ACTION_DOWN) noteDockInteraction()
         val code = event.keyCode
 
         // BACK closes an open sheet, and must be checked BEFORE the key router.
@@ -989,7 +1156,10 @@ class MainActivity : ComponentActivity() {
         // over, which is both maddening and the opposite of the battery saving
         // the timeout exists for.
         val cfg = motionCfg()
-        Log.i(KEY_TAG, "motion wake fired: $cfg (device=$deviceName)")
+        // Docked remotes do not get woken by movement. A remote on charge is
+        // sitting still by definition, and the hand reaching for it will press
+        // something -- so the only motion it can see is the surface it shares.
+        if (cfg.ignoreWhileCharging && charging) return
         if (SystemClock.elapsedRealtime() - screenOffAt < cfg.settleSeconds * 1000L) return
         val now = System.currentTimeMillis()
         if (now - lastWakeMs < cfg.cooldownSeconds * 1000L) return

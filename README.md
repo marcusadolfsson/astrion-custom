@@ -67,7 +67,7 @@ layout) is unchanged. Each item below landed as its own commit.
 | **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional` |
 | **Changed cards** | `bubble_climate` rebuilt (hold indicator, mode + dual setpoints, scrolling picker), brightness sliders and a radio latch button inside `bubble_select`, `media_player` transport rework + auto-collapse + stale-metadata guard, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
 | **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
-| **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, swipe-up info panel, per-remote start page and motion-wake tuning |
+| **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, swipe-up info panel, per-remote start page, tilt-based motion wake and dock display |
 | **Voice** | the VOICE key streams the mic to an endpoint you configure; ends on silence |
 | **UI** | dark theme so menus and dialogs stop arriving white, press feedback on controls that answer late, transient volume / mute overlay, voice indicator |
 | **Build** | signed, R8-minified release (16 MB → 1.3 MB), bounded Gradle heap |
@@ -116,7 +116,7 @@ a toolchain — but **adding a brand-new card type means compiling** (see
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
-adb install releases/astrion-custom-0.50.0.apk
+adb install releases/astrion-custom-0.51.3.apk
 ```
 
 **Option B — build from source.** You need:

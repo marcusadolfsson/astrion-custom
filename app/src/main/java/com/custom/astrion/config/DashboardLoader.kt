@@ -178,6 +178,7 @@ object DashboardLoader {
                     pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys,
                     overlay, voice, gestures, status, pageEntity,
                     parseMotionWake(root["motion_wake"] as? JsonObject),
+                    parseDockDisplay(root["dock_display"] as? JsonObject),
                 )
             }
             else -> error("top level must be an object or array")
@@ -221,16 +222,40 @@ object DashboardLoader {
         if (o == null) return d
         fun one(j: JsonObject, base: MotionWakeConfig) = MotionWakeConfig(
             enabled = (j["enabled"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: base.enabled,
-            threshold = (j["threshold"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.threshold,
+            tiltDegrees = (j["tilt_degrees"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.tiltDegrees,
+            jerkRatio = (j["jerk_ratio"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.jerkRatio,
             hits = (j["hits"] as? JsonPrimitive)?.content?.toIntOrNull() ?: base.hits,
             settleSeconds = (j["settle_seconds"] as? JsonPrimitive)?.content?.toIntOrNull() ?: base.settleSeconds,
             cooldownSeconds = (j["cooldown_seconds"] as? JsonPrimitive)?.content?.toIntOrNull() ?: base.cooldownSeconds,
             windowMs = (j["window_ms"] as? JsonPrimitive)?.content?.toLongOrNull() ?: base.windowMs,
+            ignoreWhileCharging = (j["ignore_while_charging"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
+                ?: base.ignoreWhileCharging,
         )
         val global = one(o, d)
         val devices = (o["devices"] as? JsonObject)?.entries?.associate { (k, v) ->
             // Device blocks inherit the GLOBAL values for anything they omit, so
             // a block that only raises `threshold` keeps the shared settle window.
+            k to ((v as? JsonObject)?.let { one(it, global) } ?: global)
+        } ?: emptyMap()
+        return global.copy(devices = devices)
+    }
+
+    /**
+     * Dock display behaviour, same per-remote `devices:` shape as motion wake --
+     * a remote on a nightstand and one on a side table want different night-time
+     * brightness, and only one of them is in a bedroom.
+     */
+    private fun parseDockDisplay(o: JsonObject?): DockDisplayConfig {
+        val d = DockDisplayConfig()
+        if (o == null) return d
+        fun one(j: JsonObject, base: DockDisplayConfig) = DockDisplayConfig(
+            enabled = (j["enabled"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: base.enabled,
+            dimLevel = (j["dim_level"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.dimLevel,
+            brightLevel = (j["bright_level"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.brightLevel,
+            brightSeconds = (j["bright_seconds"] as? JsonPrimitive)?.content?.toIntOrNull() ?: base.brightSeconds,
+        )
+        val global = one(o, d)
+        val devices = (o["devices"] as? JsonObject)?.entries?.associate { (k, v) ->
             k to ((v as? JsonObject)?.let { one(it, global) } ?: global)
         } ?: emptyMap()
         return global.copy(devices = devices)

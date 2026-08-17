@@ -42,6 +42,8 @@ data class AppConfig(
     val pageEntity: String? = null,
     /** Motion-wake tuning; see [MotionWakeConfig]. Absent means built-in defaults. */
     val motionWake: MotionWakeConfig = MotionWakeConfig(),
+    /** What the display does while the remote is on charge. */
+    val dockDisplay: DockDisplayConfig = DockDisplayConfig(),
 )
 
 /**
@@ -63,9 +65,33 @@ data class AppConfig(
 data class MotionWakeConfig(
     /** Off entirely. The `no-motion-wake` file flag also forces this off. */
     val enabled: Boolean = true,
-    /** Accel magnitude delta (m/s²) counting as movement. */
-    val threshold: Float = 2.0f,
-    /** Consecutive samples above [threshold] before the screen lights. */
+    /**
+     * Degrees of TILT that count as a pick-up.
+     *
+     * The detector watches the direction of the gravity vector, not the size of
+     * an acceleration spike, because that is what actually distinguishes the two
+     * cases here: picking a remote off a surface rotates it several degrees,
+     * while a knock or a body-shift on a bed jolts it without turning it. The
+     * old magnitude test could not tell those apart at any threshold -- to it
+     * they are the same number -- which is why tuning it kept trading "wakes in
+     * your hand" against "wakes all night".
+     *
+     * Angles are also immune to the scale fault found on one of these remotes,
+     * whose accelerometer reads ~2x true (18.9 m/s² at rest against 9.6 on its
+     * twin). Normalising the vector cancels that, so one config number finally
+     * means the same thing on every unit.
+     */
+    val tiltDegrees: Float = 10f,
+    /**
+     * Sudden movement as a FRACTION of this device's own resting gravity.
+     *
+     * Kept alongside the tilt test so a deliberate shake still wakes a remote
+     * that is not being turned. Expressed as a ratio rather than m/s² for the
+     * same reason as above: 0.25 means a quarter of g on any unit, however its
+     * sensor is scaled.
+     */
+    val jerkRatio: Float = 0.25f,
+    /** Samples that must qualify before the screen lights. */
     val hits: Int = 2,
     /** Ignore motion for this long after the display turns off. */
     val settleSeconds: Int = 8,
@@ -80,6 +106,14 @@ data class MotionWakeConfig(
      * made even a violent shake fail to register.
      */
     val windowMs: Long = 1200,
+    /**
+     * Skip motion wake entirely while the remote is charging.
+     *
+     * A docked remote does not need to be woken by movement: it is sitting
+     * still, and the hand that reaches for it will press something. This costs
+     * nothing when it is right and saves the whole problem when it is not.
+     */
+    val ignoreWhileCharging: Boolean = true,
     /** Per-remote overrides, keyed by the `device` slug in ConnectionConfig. */
     val devices: Map<String, MotionWakeConfig> = emptyMap(),
 ) {
@@ -90,6 +124,33 @@ data class MotionWakeConfig(
      * inheriting one while overriding the other gives a combination nobody chose.
      */
     fun forDevice(device: String): MotionWakeConfig =
+        devices[device]?.copy(devices = emptyMap()) ?: copy(devices = emptyMap())
+}
+
+/**
+ * What the display does while the remote is charging.
+ *
+ * A docked remote is a small always-on status panel, so letting it sleep wastes
+ * the one thing a dock makes free: mains power. Held on at the lowest readable
+ * backlight it stays glanceable, and any touch brings it to full brightness for
+ * [brightSeconds] before it fades back.
+ *
+ * Deliberately gated on CHARGING rather than on a dock intent: these remotes
+ * report no dock state, and "on power" is the same question in practice.
+ */
+data class DockDisplayConfig(
+    /** Off by default: this changes what an idle remote looks like all night. */
+    val enabled: Boolean = false,
+    /** Backlight while idle on the dock, 0..1. */
+    val dimLevel: Float = 0.02f,
+    /** Backlight after a touch, 0..1. */
+    val brightLevel: Float = 0.6f,
+    /** How long a touch holds full brightness before fading back to [dimLevel]. */
+    val brightSeconds: Int = 20,
+    /** Per-remote overrides, keyed by the `device` slug in ConnectionConfig. */
+    val devices: Map<String, DockDisplayConfig> = emptyMap(),
+) {
+    fun forDevice(device: String): DockDisplayConfig =
         devices[device]?.copy(devices = emptyMap()) ?: copy(devices = emptyMap())
 }
 

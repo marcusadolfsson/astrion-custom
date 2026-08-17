@@ -39,6 +39,9 @@ import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRenderer
 import com.custom.astrion.ha.ServiceCall
+import com.custom.astrion.ui.ackColor
+import com.custom.astrion.ui.pressFeedback
+import com.custom.astrion.ui.rememberPressFeedback
 import kotlin.math.roundToInt
 
 /**
@@ -69,6 +72,20 @@ import kotlin.math.roundToInt
  *
  * Put these LAST — they are controls, not choices, and the menu reads as a list of
  * options until it stops being one.
+ *
+ * `toggle` adds a latch button to the pill itself, beside the chevron:
+ *
+ *   "toggle": { "icon": "remote", "entity": "input_select.lr_key_target",
+ *               "on_value": "Source 2", "off_value": "Default",
+ *               "hidden_for": ["Off", "Switch"] }
+ *
+ * It is a RADIO rather than a checkbox — every card writes its own `on_value`
+ * into ONE shared entity, so latching a second card releases the first with no
+ * coordination between them, and "only one at a time" is a property of the data
+ * rather than a rule someone has to enforce. `hidden_for` lists states of the
+ * card's own `active_entity` for which the button is not drawn at all, for
+ * targets that cannot be acted on; an inert button is worse than no button,
+ * because it invites the press it will ignore.
  */
 class BubbleSelectCard : CardRenderer {
     override val type = "bubble_select"
@@ -117,6 +134,48 @@ class BubbleSelectCard : CardRenderer {
                         Text(name, color = Color(0xFF93AFB6), fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     }
                     Text(currentName, color = Color(0xFFF1F4FA), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                }
+                // Optional latch button, drawn between the value and the chevron.
+                // It is a RADIO, not a checkbox: it writes this card's on_value
+                // into one shared entity, so latching another card releases this
+                // one with no coordination between them.
+                @Suppress("UNCHECKED_CAST")
+                val toggle = config.options["toggle"] as? Map<String, Any?>
+                if (toggle != null) {
+                    val toggleEntity = toggle["entity"] as? String
+                    val onValue = toggle["on_value"] as? String
+                    val offValue = toggle["off_value"] as? String ?: ""
+                    // Hidden for source values that cannot be driven at all --
+                    // an affordance that is present but inert is worse than one
+                    // that is absent, because the first invites a press.
+                    val hiddenFor = (toggle["hidden_for"] as? List<String>).orEmpty()
+                    if (toggleEntity != null && onValue != null && currentState !in hiddenFor) {
+                        val latched = ctx.entities[toggleEntity]?.state == onValue
+                        val (press, click) = rememberPressFeedback {
+                            ctx.client.callService(
+                                ServiceCall.of(
+                                    "input_select", "select_option", toggleEntity,
+                                    "option" to (if (latched) offValue else onValue),
+                                )
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(ackColor(if (latched) Color(0xFF2E7D95) else Color(0xFF13272E), press))
+                                .pressFeedback(press, click),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                CardIcons.forName(toggle["icon"] as? String ?: "remote"),
+                                contentDescription = "Control this source",
+                                tint = if (latched) Color.White else Color(0xFF6C8A94),
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    }
                 }
                 Icon(Icons.Filled.ExpandMore, contentDescription = null, tint = Color(0xFF93AFB6))
             }

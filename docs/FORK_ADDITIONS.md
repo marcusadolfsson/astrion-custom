@@ -65,6 +65,34 @@ Implementation note if you add controls of your own here: a slider inside a
 its content with unbounded constraints — and inheriting the menu item's gesture
 handling makes every drag select the item and close the menu.
 
+The pill can also carry a **latch button**, beside the chevron, for when a card
+needs to say *this one is the active target* as well as show a value:
+
+```json
+{ "type": "bubble_select", "options": {
+    "name": "Source 2", "icon": "source",
+    "active_entity": "input_select.mv_source_2",
+    "toggle": { "icon": "remote", "entity": "input_select.key_target",
+                "on_value": "Source 2", "off_value": "Default",
+                "hidden_for": ["Off", "Switch"] },
+    "options": [ … ] } }
+```
+
+It is a **radio, not a checkbox**. Every card writes its own `on_value` into one
+shared entity, so latching a second card releases the first with no coordination
+between them — "only one at a time" becomes a property of the data rather than a
+rule something has to enforce.
+
+`hidden_for` lists states of the card's *own* `active_entity` for which the
+button is not drawn at all. It exists for targets that cannot be acted on: an
+inert button is worse than no button, because it invites the press it is going
+to ignore.
+
+> Used here to point the remote's physical keys at one pane of a multi-view wall
+> instead of at whatever the room is watching. That routing is Home Assistant's
+> job, not the app's — the card only writes a value into an `input_select`, and
+> what the keys do with it is decided by the scripts they call.
+
 ### `shade_control`
 
 A cover controller with the target selector on the left and open / stop / close

@@ -151,6 +151,208 @@ pages:
           - name: Compact
             service: script.lr_screen_compact
             active_value: Compact
+          # Labelled "Multi", but the engine's option string is "Multi View" --
+          # active_value has to be the engine's, the name is what fits the pill.
+          - name: Multi
+            service: script.lr_screen_multi
+            active_value: Multi View
+      # Multi-View, mirroring the TV Wall dashboard: how many panes, then one
+      # picker per additional pane. Only while the wall is actually in Multi
+      # View -- these controls mean nothing in Full or Compact.
+      #
+      # Each picker writes its input_select directly rather than going through a
+      # script, because unlike Screen Size there is nothing to wrap: the options
+      # ARE the entity's options. They are rebuilt at runtime by
+      # automation.lr_mv_restrict_source_options from the input-name helpers, so
+      # the list below is the full set and the engine refuses the impossible
+      # picks (the VRROOM can carry only two distinct sources at once).
+      - type: conditional
+        options:
+          entity_id: input_select.lr_screen_layout
+          state: Multi View
+          cards:
+          - type: bubble_select
+            options:
+              name: Panes
+              icon: layout
+              active_entity: input_select.lr_multiview_layout
+              options:
+              - name: 1 Source
+                service: input_select.select_option
+                entity_id: input_select.lr_multiview_layout
+                data: {option: 1 Source}
+                active_value: 1 Source
+              - name: 2 Sources
+                service: input_select.select_option
+                entity_id: input_select.lr_multiview_layout
+                data: {option: 2 Sources}
+                active_value: 2 Sources
+              - name: 3 Sources
+                service: input_select.select_option
+                entity_id: input_select.lr_multiview_layout
+                data: {option: 3 Sources}
+                active_value: 3 Sources
+              - name: 4 Sources
+                service: input_select.select_option
+                entity_id: input_select.lr_multiview_layout
+                data: {option: 4 Sources}
+                active_value: 4 Sources
+          # Pane 2 exists from "2 Sources" up, pane 3 from "3 Sources", pane 4
+          # only at "4 Sources" -- offering a picker for a pane that is not on
+          # screen is an instruction that silently does nothing.
+          - type: conditional
+            options:
+              entity_id: input_select.lr_multiview_layout
+              state_in: [2 Sources, 3 Sources, 4 Sources]
+              card:
+                type: bubble_select
+                options:
+                  name: Source 2
+                  icon: source
+                  active_entity: input_select.lr_mv_source_2
+                  # Latch the remote's physical keys onto THIS pane. One
+                  # shared entity holds the latch, so tapping another
+                  # pane's icon releases this one. Not drawn for Off or
+                  # Switch: neither has a remote entity to send to.
+                  toggle:
+                    icon: remote
+                    entity: input_select.lr_key_target
+                    on_value: Source 2
+                    off_value: Default
+                    hidden_for: ['Off', 'Switch']
+                  options:
+                  - name: 'Off'
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_2
+                    data: {option: 'Off'}
+                    active_value: 'Off'
+                  - name: Apple TV
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_2
+                    data: {option: ATV1}
+                    active_value: ATV1
+                  - name: Apple TV 2
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_2
+                    data: {option: ATV2}
+                    active_value: ATV2
+                  - name: Apple TV 3
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_2
+                    data: {option: ATV3}
+                    active_value: ATV3
+                  - name: Kaleidescape
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_2
+                    data: {option: KScape}
+                    active_value: KScape
+                  - name: Switch
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_2
+                    data: {option: Switch}
+                    active_value: Switch
+          - type: conditional
+            options:
+              entity_id: input_select.lr_multiview_layout
+              state_in: [3 Sources, 4 Sources]
+              card:
+                type: bubble_select
+                options:
+                  name: Source 3
+                  icon: source
+                  active_entity: input_select.lr_mv_source_3
+                  # Latch the remote's physical keys onto THIS pane. One
+                  # shared entity holds the latch, so tapping another
+                  # pane's icon releases this one. Not drawn for Off or
+                  # Switch: neither has a remote entity to send to.
+                  toggle:
+                    icon: remote
+                    entity: input_select.lr_key_target
+                    on_value: Source 3
+                    off_value: Default
+                    hidden_for: ['Off', 'Switch']
+                  options:
+                  - name: 'Off'
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_3
+                    data: {option: 'Off'}
+                    active_value: 'Off'
+                  - name: Apple TV
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_3
+                    data: {option: ATV1}
+                    active_value: ATV1
+                  - name: Apple TV 2
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_3
+                    data: {option: ATV2}
+                    active_value: ATV2
+                  - name: Apple TV 3
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_3
+                    data: {option: ATV3}
+                    active_value: ATV3
+                  - name: Kaleidescape
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_3
+                    data: {option: KScape}
+                    active_value: KScape
+                  - name: Switch
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_3
+                    data: {option: Switch}
+                    active_value: Switch
+          - type: conditional
+            options:
+              entity_id: input_select.lr_multiview_layout
+              state: 4 Sources
+              card:
+                type: bubble_select
+                options:
+                  name: Source 4
+                  icon: source
+                  active_entity: input_select.lr_mv_source_4
+                  # Latch the remote's physical keys onto THIS pane. One
+                  # shared entity holds the latch, so tapping another
+                  # pane's icon releases this one. Not drawn for Off or
+                  # Switch: neither has a remote entity to send to.
+                  toggle:
+                    icon: remote
+                    entity: input_select.lr_key_target
+                    on_value: Source 4
+                    off_value: Default
+                    hidden_for: ['Off', 'Switch']
+                  options:
+                  - name: 'Off'
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_4
+                    data: {option: 'Off'}
+                    active_value: 'Off'
+                  - name: Apple TV
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_4
+                    data: {option: ATV1}
+                    active_value: ATV1
+                  - name: Apple TV 2
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_4
+                    data: {option: ATV2}
+                    active_value: ATV2
+                  - name: Apple TV 3
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_4
+                    data: {option: ATV3}
+                    active_value: ATV3
+                  - name: Kaleidescape
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_4
+                    data: {option: KScape}
+                    active_value: KScape
+                  - name: Switch
+                    service: input_select.select_option
+                    entity_id: input_select.lr_mv_source_4
+                    data: {option: Switch}
+                    active_value: Switch
   - type: separator
     options:
       name: Lights

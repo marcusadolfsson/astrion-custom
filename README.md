@@ -38,14 +38,19 @@ doing right now, and — when a `hold_entity` is configured — a Holding chip w
 button sits inline beside the wheel rather than in a corner, so the numbers stay
 on the dialog's centre line.
 
-| Select with sliders | Fan speeds |
-|---|---|
-| ![Select](examples/screenshots/16-select-with-sliders.png) | ![Fan](examples/screenshots/17-fan-dropdown.png) |
+| Select with sliders | Fan speeds | Source latch |
+|---|---|---|
+| ![Select](examples/screenshots/16-select-with-sliders.png) | ![Fan](examples/screenshots/17-fan-dropdown.png) | ![Latch](examples/screenshots/18-source-latch.png) |
 
 Dropdowns are themed to match the app, and a `select` card can carry brightness
 sliders for the lights its options adjust. Compose takes menu and dialog colours
 from `MaterialTheme` rather than from the caller, so without the app's own theme
 these arrive in the default *light* palette on a dark dashboard.
+
+The third shot shows a `select` pill with a **latch button**: several cards share
+one entity, so latching one releases the others. Here it decides which pane of a
+multi-view video wall the remote's physical keys drive — the card just writes a
+value, and Home Assistant decides what the keys do with it.
 
 The layout behind these shots is [`examples/dashboard.yaml`](examples/dashboard.yaml)
 — a real, in-use configuration rather than a toy one.
@@ -60,7 +65,7 @@ layout) is unchanged. Each item below landed as its own commit.
 | Area | Change |
 |---|---|
 | **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional` |
-| **Changed cards** | `bubble_climate` rebuilt (hold indicator, mode + dual setpoints, scrolling picker), brightness sliders inside `bubble_select`, `media_player` transport rework + auto-collapse + stale-metadata guard, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
+| **Changed cards** | `bubble_climate` rebuilt (hold indicator, mode + dual setpoints, scrolling picker), brightness sliders and a radio latch button inside `bubble_select`, `media_player` transport rework + auto-collapse + stale-metadata guard, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
 | **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
 | **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, swipe-up info panel, per-remote start page and motion-wake tuning |
 | **Voice** | the VOICE key streams the mic to an endpoint you configure; ends on silence |
@@ -111,7 +116,7 @@ a toolchain — but **adding a brand-new card type means compiling** (see
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
-adb install releases/astrion-custom-0.49.1.apk
+adb install releases/astrion-custom-0.50.0.apk
 ```
 
 **Option B — build from source.** You need:

@@ -76,19 +76,25 @@ data class MotionWakeConfig(
      * they are the same number -- which is why tuning it kept trading "wakes in
      * your hand" against "wakes all night".
      *
-     * Angles are also immune to the scale fault found on one of these remotes,
-     * whose accelerometer reads ~2x true (18.9 m/s² at rest against 9.6 on its
-     * twin). Normalising the vector cancels that, so one config number finally
-     * means the same thing on every unit.
+     * The angle is computed from the DIFFERENCE between the current gravity
+     * estimate and the resting one, measured against the physical constant g --
+     * not from the angle between two normalised vectors. That form is what
+     * survives the biased sensor found on one of these remotes, which rests at
+     * ~+1.1 g on its z axis (raw 1787 counts where its twin reads 657, x and y
+     * ordinary, both calibration stores empty). Normalising does NOT cancel a
+     * constant bias -- it pulls the computed direction toward the biased axis and
+     * compresses every angle -- but subtracting two measurements does, because
+     * the bias is in both. So one config number finally means the same movement
+     * on every unit, healthy or not.
      */
     val tiltDegrees: Float = 10f,
     /**
      * Sudden movement as a FRACTION of this device's own resting gravity.
      *
      * Kept alongside the tilt test so a deliberate shake still wakes a remote
-     * that is not being turned. Expressed as a ratio rather than m/s² for the
-     * same reason as above: 0.25 means a quarter of g on any unit, however its
-     * sensor is scaled.
+     * that is not being turned. Expressed as a ratio of g rather than as raw
+     * m/s² so it reads the same on any unit; like the tilt term it is a
+     * difference, so a constant sensor bias cancels.
      */
     val jerkRatio: Float = 0.25f,
     /** Samples that must qualify before the screen lights. */

@@ -92,6 +92,9 @@ class MainActivity : ComponentActivity() {
          */
         const val GRAVITY_LPF = 0.15f
 
+        /** How far resting |a| may sit from 1 g before it is worth warning about. */
+        const val GRAVITY_EARTH_TOLERANCE = 2.0f
+
         // Motion-wake tuning moved to MotionWakeConfig (dashboard.yaml
         // `motion_wake:`, with per-remote blocks) -- the fixed values here could
         // not serve both a remote on a side table and two that live in a bed.
@@ -129,6 +132,8 @@ class MainActivity : ComponentActivity() {
     private var refX = 0f
     private var refY = 0f
     private var refZ = 0f
+    /** One-shot guard for the resting-gravity sanity warning. */
+    private var biasWarned = false
 
     private val motionListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
@@ -157,18 +162,43 @@ class MainActivity : ComponentActivity() {
             val refMag = sqrt(refX * refX + refY * refY + refZ * refZ)
             if (gMag < 0.001f || refMag < 0.001f) return
 
-            // Angle between the current gravity direction and the resting one.
-            // Both sides are normalised, so a sensor reading twice true scale --
-            // as one of these remotes does -- gives the same angle as a healthy
-            // one. That is the whole reason this is an angle and not a delta.
-            val cos = ((gx * refX + gy * refY + gz * refZ) / (gMag * refMag))
-                .coerceIn(-1f, 1f)
-            val tiltDeg = Math.toDegrees(kotlin.math.acos(cos).toDouble()).toFloat()
+            // Tilt from the DIFFERENCE between the current gravity direction and
+            // the resting one, not from the angle between them.
+            //
+            // This is the form that survives a biased sensor. One of these
+            // remotes reads ~+1.1 g on its z axis at rest (raw 1787 counts where
+            // its twin reads 657, x and y ordinary, and both calibration stores
+            // empty) -- a constant per-axis bias, not a scale error. Normalising
+            // does NOT cancel a bias: it drags the computed direction toward the
+            // biased axis and compresses every measured angle, so the same
+            // tilt_degrees would quietly need a much bigger real movement on that
+            // unit than on a healthy one.
+            //
+            // Subtracting two measurements DOES cancel it -- the bias is in both
+            // terms. Two vectors of length g separated by angle t are 2*g*sin(t/2)
+            // apart, so the angle comes back exactly, using the physical constant
+            // rather than this sensor's own idea of how long gravity is.
+            val dx = gx - refX
+            val dy = gy - refY
+            val dz = gz - refZ
+            val chord = sqrt(dx * dx + dy * dy + dz * dz)
+            val tiltDeg = Math.toDegrees(
+                2.0 * kotlin.math.asin((chord / (2f * SensorManager.GRAVITY_EARTH)).coerceIn(0f, 1f).toDouble())
+            ).toFloat()
 
-            // Sudden movement, as a fraction of THIS device's own resting
-            // gravity -- again scale-free. Catches a deliberate shake that does
-            // not turn the remote.
-            val jerk = abs(mag - lastMagnitude) / gMag
+            // Sudden movement, also as a difference and also against the physical
+            // constant, for the same reason.
+            val jerk = abs(mag - lastMagnitude) / SensorManager.GRAVITY_EARTH
+
+            // Say so, once, if this sensor is not reporting 1 g at rest. The bias
+            // above was invisible for weeks and cost two rounds of tuning that
+            // could never have converged; a device that lies about gravity should
+            // not do it silently.
+            if (!biasWarned && motionHits == 0 && abs(gMag - SensorManager.GRAVITY_EARTH) > GRAVITY_EARTH_TOLERANCE) {
+                biasWarned = true
+                Log.w(KEY_TAG, "accelerometer rests at %.2f m/s^2, expected ~9.81 (device=%s) -- biased sensor, tilt uses differences so this is compensated"
+                    .format(gMag, deviceName))
+            }
             lastMagnitude = mag
 
             val now = SystemClock.elapsedRealtime()

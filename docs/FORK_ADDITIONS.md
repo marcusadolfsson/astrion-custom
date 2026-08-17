@@ -889,12 +889,29 @@ motion_wake:
     nightstand: { tilt_degrees: 14, settle_seconds: 10 }
 ```
 
-Both thresholds are **scale-free**, which is worth more than it sounds. One of
-these remotes reports ~2× true acceleration — 18.9 m/s² at rest against 9.6 on an
-identical unit, with x and y agreeing, so a plain range/scale fault. A threshold
-in m/s² silently means half as much on that unit as on its twin, and tuning the
-pair against each other never converges. Normalising cancels it: an angle is an
-angle on any sensor.
+**Compute the tilt as a difference, not as an angle between normalised vectors.**
+That detail is what makes it survive a miscalibrated sensor, and it is worth
+spelling out because the wrong version looks correct and fails silently.
+
+One remote here rests at 18.9 m/s² where an identical unit reads 9.6. Reading the
+driver's raw counts (1024 = 1 g) shows why: `x=-53 y=-772 z=1787` against
+`x=-23 y=-746 z=657`. x and y are ordinary on both — the entire error is z, about
++1130 counts, i.e. a **constant per-axis bias of ~1.1 g**, not a scale error.
+
+Normalising cancels a scale error but *not* a bias: a bias drags the computed
+gravity direction toward its own axis and compresses every angle measured from
+it, so the same `tilt_degrees` would demand a much larger real movement on that
+unit. Subtracting two measurements does cancel it, because the bias is present in
+both terms. Tilt is therefore the chord between the current gravity estimate and
+the resting one, converted with `2·asin(chord / 2g)` against the physical
+constant rather than against the sensor's own idea of how long gravity is — exact
+on a healthy unit, unaffected on a biased one. `jerk_ratio` is a difference
+against the same constant.
+
+The app also logs a warning once at startup when resting |a| is more than
+2 m/s² away from 1 g. A device that lies about gravity should not be able to do
+it silently; this one did for weeks, and cost two rounds of tuning that could
+never have converged.
 
 `ignore_while_charging` skips motion wake entirely while docked. A remote on
 power is sitting still by definition, and the hand reaching for it will press

@@ -78,6 +78,10 @@ and config option with JSON examples, and reports the performance work with the
 on-device measurements behind it — including one pass that measurably *didn't*
 help.
 
+**→ [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md)** records faults found in the
+HA100 units themselves, with the commands to check your own — starting with an
+accelerometer that reports 1.9 g at rest on one of ours.
+
 ---
 
 ## Install

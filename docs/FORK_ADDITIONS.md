@@ -913,6 +913,9 @@ The app also logs a warning once at startup when resting |a| is more than
 it silently; this one did for weeks, and cost two rounds of tuning that could
 never have converged.
 
+> The fault itself, the raw driver counts, and how to check your own unit are in
+> [HARDWARE_NOTES.md](HARDWARE_NOTES.md#accelerometer-constant-z-axis-bias-on-one-unit).
+
 `ignore_while_charging` skips motion wake entirely while docked. A remote on
 power is sitting still by definition, and the hand reaching for it will press
 something.

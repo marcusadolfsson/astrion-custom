@@ -25,6 +25,7 @@ import kotlin.math.sqrt
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.collectAsState
@@ -58,6 +59,7 @@ import com.custom.astrion.ha.BatteryReporter
 import com.custom.astrion.input.HardwareKeyRouter
 import com.custom.astrion.input.SleepAdminReceiver
 import com.custom.astrion.ui.Dashboard
+import com.custom.astrion.ui.Screensaver
 import com.custom.astrion.voice.MicProbe
 import com.custom.astrion.voice.VoiceSession
 
@@ -94,6 +96,15 @@ class MainActivity : ComponentActivity() {
 
         /** How far resting |a| may sit from 1 g before it is worth warning about. */
         const val GRAVITY_EARTH_TOLERANCE = 2.0f
+
+        /** Per-sample change in the gravity estimate below which we call it still. */
+        const val STILL_EPSILON = 0.06f
+
+        /** How long it must stay still before that attitude becomes the reference. */
+        const val STILL_MS = 1500L
+
+        /** Below this, never hold the screen on, whatever the charger reports. */
+        const val BATTERY_FLOOR_PCT = 15
 
         // Motion-wake tuning moved to MotionWakeConfig (dashboard.yaml
         // `motion_wake:`, with per-remote blocks) -- the fixed values here could
@@ -134,6 +145,12 @@ class MainActivity : ComponentActivity() {
     private var refZ = 0f
     /** One-shot guard for the resting-gravity sanity warning. */
     private var biasWarned = false
+    /** Previous gravity estimate, for the stillness test. */
+    private var lastGx = 0f
+    private var lastGy = 0f
+    private var lastGz = 0f
+    /** When the remote last moved; stillness is measured from here. */
+    private var stillSince = 0L
 
     private val motionListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
@@ -213,14 +230,34 @@ class MainActivity : ComponentActivity() {
                     motionWindowStart = now
                     Log.i(KEY_TAG, "motion: tilt=%.1f° jerk=%.2f (device=%s)"
                         .format(tiltDeg, jerk, deviceName))
+                    // Adopt the current attitude as we fire. The movement has
+                    // been acted on; leaving the old reference in place is what
+                    // made the remote fire again on the very same tilt.
+                    refX = gx; refY = gy; refZ = gz
                     wakeScreen()
                 }
-            } else if (tiltDeg < cfg.tiltDegrees / 2f) {
-                // Settled at a new attitude: adopt it as the reference, so being
-                // set down at a different angle does not leave the remote one
-                // degree from firing for the rest of the night.
+            }
+
+            // Re-reference whenever the remote has been STILL for a moment,
+            // whatever angle that is.
+            //
+            // This used to re-reference only when the tilt was already small,
+            // which is precisely backwards: a remote set down at a NEW angle
+            // stays past the threshold forever, so it fired, kept the old
+            // reference, and fired again on the next window -- the screen
+            // dimming and relighting all night on a remote lying flat on a
+            // table. Stillness, not agreement with the old reference, is what
+            // says "this is where it lives now".
+            if (sqrt(
+                    (gx - lastGx) * (gx - lastGx) +
+                    (gy - lastGy) * (gy - lastGy) +
+                    (gz - lastGz) * (gz - lastGz)
+                ) > STILL_EPSILON) {
+                stillSince = now
+            } else if (now - stillSince > STILL_MS) {
                 refX = gx; refY = gy; refZ = gz
             }
+            lastGx = gx; lastGy = gy; lastGz = gz
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
@@ -239,11 +276,87 @@ class MainActivity : ComponentActivity() {
     /** When the display last turned off, for the motion-wake settle window. */
     @Volatile private var screenOffAt = 0L
 
-    /** True while the remote is on power. Drives both dock display and the
-     *  motion-wake charging gate; kept as state so neither has to poll. */
+    /**
+     * True while the battery is actually GAINING, not merely plugged in.
+     *
+     * This started as EXTRA_PLUGGED != 0 and that was a real mistake: plugged
+     * means a cable is attached, not that the charger is winning. The living
+     * room dock reports plugged while supplying less than a permanently-lit
+     * screen draws, so dock display held the display on and the remote went from
+     * 93% to flat in seven and a half hours -- roughly 12%/hour, overnight,
+     * while reporting "AC powered: true" the whole way down.
+     *
+     * EXTRA_STATUS is the question we actually meant: CHARGING or FULL means the
+     * dock can carry it, DISCHARGING means it cannot, whatever the cable says.
+     */
     @Volatile private var charging = false
 
     private fun dockCfg() = dashboard.config.dockDisplay.forDevice(deviceName)
+
+    /**
+     * Is the battery gaining? Null when it cannot be read.
+     *
+     * Also false below [BATTERY_FLOOR_PCT] whatever the charger says, so a dock
+     * that is losing ground cannot hold the screen on all the way to empty.
+     */
+    private fun readCharging(): Boolean? {
+        val i = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return null
+        val status = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+        val pct = if (level < 0) 100 else level * 100 / scale
+        if (pct < BATTERY_FLOOR_PCT) return false
+        return status == BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == BatteryManager.BATTERY_STATUS_FULL
+    }
+
+    /**
+     * Re-check power every minute while the screen is being held on.
+     *
+     * The connect/disconnect broadcasts do not fire when a charger merely stops
+     * keeping up, which is the case that emptied a remote overnight. Polling a
+     * sticky broadcast once a minute costs nothing and is the only way to notice.
+     */
+    private val dockWatchdog = object : Runnable {
+        override fun run() {
+            val was = charging
+            charging = readCharging() ?: charging
+            if (charging != was) {
+                Log.i(KEY_TAG, "power state -> " + (if (charging) "charging" else "not charging"))
+                applyDockDisplay()
+                armScreensaver()
+            }
+            keyHandler.postDelayed(this, 60_000)
+        }
+    }
+
+    private fun saverCfg() = dashboard.config.screensaver.forDevice(deviceName)
+
+    /** True while the idle clock is covering the dashboard. */
+    private var screensaverOn by mutableStateOf(false)
+
+    /**
+     * Arm the idle timer that raises the clock, cancelling any previous one.
+     *
+     * Docked only. Off the dock the display sleeps on its own and a clock would
+     * just be a lit screen on a battery -- which is the exact failure this
+     * device already has form for.
+     */
+    private fun armScreensaver() {
+        keyHandler.removeCallbacks(showScreensaver)
+        val cfg = saverCfg()
+        if (cfg.enabled && charging && dockCfg().enabled) {
+            keyHandler.postDelayed(showScreensaver, cfg.idleSeconds * 1000L)
+        }
+    }
+
+    private val showScreensaver = Runnable {
+        if (saverCfg().enabled && charging) {
+            screensaverOn = true
+            // Re-apply so the backlight comes up to the clock's own level.
+            applyDockDisplay()
+        }
+    }
 
     private val screenWatcher = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
@@ -259,8 +372,13 @@ class MainActivity : ComponentActivity() {
                     noteDockInteraction()
                 }
                 Intent.ACTION_SCREEN_OFF -> screenOffAt = SystemClock.elapsedRealtime()
-                Intent.ACTION_POWER_CONNECTED -> { charging = true; applyDockDisplay() }
-                Intent.ACTION_POWER_DISCONNECTED -> { charging = false; applyDockDisplay() }
+                Intent.ACTION_POWER_CONNECTED -> { charging = true; applyDockDisplay(); armScreensaver() }
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    charging = false
+                    screensaverOn = false
+                    applyDockDisplay()
+                    armScreensaver()
+                }
             }
         }
     }
@@ -288,6 +406,10 @@ class MainActivity : ComponentActivity() {
             window.attributes = window.attributes.apply {
                 screenBrightness = when {
                     !on -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    // The clock gets its own level. The dock dims the DASHBOARD
+                    // because nobody is meant to read it; the clock is the one
+                    // thing on a docked remote that is.
+                    screensaverOn -> saverCfg().brightness.coerceIn(0.01f, 1f)
                     bright -> cfg.brightLevel.coerceIn(0.01f, 1f)
                     else -> cfg.dimLevel.coerceIn(0.01f, 1f)
                 }
@@ -302,12 +424,21 @@ class MainActivity : ComponentActivity() {
      * because "the user did something" is exactly what those already know and a
      * separate watcher would have to re-derive it.
      */
+    /**
+     * Called for every touch and key press: the one place that knows the user is
+     * present. Drops the clock, brightens the dock, restarts the idle countdown.
+     */
+    private fun noteInteraction() {
+        if (screensaverOn) screensaverOn = false
+        noteDockInteraction()
+        armScreensaver()
+    }
+
     private fun noteDockInteraction() {
         // Re-read power state here rather than trusting the cached flag: the
         // connect broadcast can be missed while the app is stopped, and this is
         // the cheap moment to notice.
-        charging = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            ?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)?.let { it != 0 } ?: charging
+        charging = readCharging() ?: charging
         if (!charging || !dockCfg().enabled) {
             applyDockDisplay()
             return
@@ -775,6 +906,12 @@ class MainActivity : ComponentActivity() {
                 snapshotFlow { entities.value }.collect { followPageEntity(it) }
             }
             AstrionTheme {
+              // The clock is drawn OVER the dashboard rather than replacing it,
+              // so dismissing it costs no recomposition of the pages underneath
+              // and the remote is already on the right page when it comes back.
+              androidx.compose.foundation.layout.Box(
+                  modifier = androidx.compose.ui.Modifier.fillMaxSize()
+              ) {
                 Dashboard(
                     client = client,
                     entitiesState = entities,
@@ -810,6 +947,8 @@ class MainActivity : ComponentActivity() {
                     stockStops = stockStops,
                     stockStopAt = stockStopAt,
                 )
+                if (screensaverOn) Screensaver(saverCfg())
+              }
             }
         }
     }
@@ -847,7 +986,12 @@ class MainActivity : ComponentActivity() {
 
     /** Any touch counts as interaction for the dock's brightness. */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        noteDockInteraction()
+        // Consume the touch that dismisses the clock. Otherwise the tap that
+        // wakes the dashboard also lands on whatever card happens to be under
+        // the finger -- which on this layout could be an activity or a shade.
+        val dismissing = screensaverOn
+        noteInteraction()
+        if (dismissing) return true
         return super.dispatchTouchEvent(ev)
     }
 
@@ -857,12 +1001,14 @@ class MainActivity : ComponentActivity() {
         // connect/disconnect broadcast -- otherwise a remote that was already on
         // charge when the app started would sit in the wrong mode until someone
         // unplugged it.
-        charging = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            ?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)?.let { it != 0 } ?: false
+        charging = readCharging() ?: false
         // Re-read the local cache on foreground (instant, no network). Pulling
         // from HA is now on-demand — swipe up for the info panel's Sync button,
         // or the VOICE hotkey — not on every resume.
         reloadDashboard()
+        armScreensaver()
+        keyHandler.removeCallbacks(dockWatchdog)
+        keyHandler.postDelayed(dockWatchdog, 60_000)
         // AFTER the reload, not before: applyDockDisplay reads the live config,
         // and running it first meant the first resume after an update decided
         // using the PREVIOUS layout -- which, for a setting that had just been
@@ -1059,7 +1205,7 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // A button press is interaction too -- the dock brightens for it
         // exactly as it does for a touch.
-        if (event.action == KeyEvent.ACTION_DOWN) noteDockInteraction()
+        if (event.action == KeyEvent.ACTION_DOWN) noteInteraction()
         val code = event.keyCode
 
         // BACK closes an open sheet, and must be checked BEFORE the key router.

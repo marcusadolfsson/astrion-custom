@@ -179,6 +179,7 @@ object DashboardLoader {
                     overlay, voice, gestures, status, pageEntity,
                     parseMotionWake(root["motion_wake"] as? JsonObject),
                     parseDockDisplay(root["dock_display"] as? JsonObject),
+                    parseScreensaver(root["screensaver"] as? JsonObject),
                 )
             }
             else -> error("top level must be an object or array")
@@ -253,6 +254,25 @@ object DashboardLoader {
             dimLevel = (j["dim_level"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.dimLevel,
             brightLevel = (j["bright_level"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.brightLevel,
             brightSeconds = (j["bright_seconds"] as? JsonPrimitive)?.content?.toIntOrNull() ?: base.brightSeconds,
+        )
+        val global = one(o, d)
+        val devices = (o["devices"] as? JsonObject)?.entries?.associate { (k, v) ->
+            k to ((v as? JsonObject)?.let { one(it, global) } ?: global)
+        } ?: emptyMap()
+        return global.copy(devices = devices)
+    }
+
+    /** Idle-clock config, same per-remote `devices:` shape as the others. */
+    private fun parseScreensaver(o: JsonObject?): ScreensaverConfig {
+        val d = ScreensaverConfig()
+        if (o == null) return d
+        fun one(j: JsonObject, base: ScreensaverConfig) = ScreensaverConfig(
+            enabled = (j["enabled"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: base.enabled,
+            idleSeconds = (j["idle_seconds"] as? JsonPrimitive)?.content?.toIntOrNull() ?: base.idleSeconds,
+            clock24h = (j["clock_24h"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: base.clock24h,
+            color = (j["color"] as? JsonPrimitive)?.content ?: base.color,
+            showDate = (j["show_date"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: base.showDate,
+            brightness = (j["brightness"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.brightness,
         )
         val global = one(o, d)
         val devices = (o["devices"] as? JsonObject)?.entries?.associate { (k, v) ->

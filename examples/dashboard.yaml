@@ -93,6 +93,13 @@ pages:
     options:
       name: Watch
       icon: tv
+      # AV lock, on the right end of the divider. Locking is one tap; unlocking
+      # opens a PIN keypad that writes to the same scratchpad helper the wall
+      # dashboard's keypad uses, so Home Assistant does the checking and there
+      # is one definition of the PIN in the house.
+      lock:
+        entity: input_boolean.tv_wall_locked
+        pin_entry: input_text.tv_wall_lock_pin_entry
   - type: bubble_select
     options:
       name: Activity
@@ -895,6 +902,27 @@ motion_wake:
 # Docked remotes stay awake as a dim status panel instead of sleeping: the dock
 # supplies mains power, so the timeout saves nothing there. Any touch or button
 # raises the backlight for `bright_seconds`, then it fades back.
+# Idle clock for a DOCKED remote. Off the dock nothing changes -- the display
+# still sleeps, so this cannot cost battery. Enabled only on the bedroom pair;
+# the living-room remote sits in a room where a lit clock is not wanted.
+screensaver:
+  enabled: false
+  idle_seconds: 90
+  clock_24h: false
+  # Not white: this faces a bed for eight hours a night, and white on black at
+  # full brightness is a lamp.
+  color: '#8A8A8A'
+  show_date: true
+  # Its own backlight, well above the dock's 1% dashboard dim -- at that level
+  # the clock renders perfectly and is invisible, which is exactly how it looked
+  # like it had never started.
+  brightness: 0.15
+  devices:
+    master_1:
+      enabled: true
+    master_2:
+      enabled: true
+
 dock_display:
   enabled: true
   dim_level: 0.02

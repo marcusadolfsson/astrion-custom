@@ -44,6 +44,8 @@ data class AppConfig(
     val motionWake: MotionWakeConfig = MotionWakeConfig(),
     /** What the display does while the remote is on charge. */
     val dockDisplay: DockDisplayConfig = DockDisplayConfig(),
+    /** Idle clock shown on a docked remote; see [ScreensaverConfig]. */
+    val screensaver: ScreensaverConfig = ScreensaverConfig(),
 )
 
 /**
@@ -157,6 +159,51 @@ data class DockDisplayConfig(
     val devices: Map<String, DockDisplayConfig> = emptyMap(),
 ) {
     fun forDevice(device: String): DockDisplayConfig =
+        devices[device]?.copy(devices = emptyMap()) ?: copy(devices = emptyMap())
+}
+
+/**
+ * A large digital clock, shown on a DOCKED remote once it has been idle.
+ *
+ * Only while charging, and only after [idleSeconds], because those two
+ * conditions are what make it free: the dock supplies mains power, and an idle
+ * remote is showing a dashboard nobody is reading. Off the dock the display
+ * still sleeps normally, so this cannot cost battery.
+ *
+ * Any touch or button returns to the dashboard, and the idle timer starts again.
+ */
+data class ScreensaverConfig(
+    /** Off by default: it replaces what an idle remote shows. */
+    val enabled: Boolean = false,
+    /** Idle time before the clock appears. */
+    val idleSeconds: Int = 90,
+    /** 24-hour clock; false shows 12-hour with a small AM/PM. */
+    val clock24h: Boolean = false,
+    /**
+     * Clock colour, "#RRGGBB".
+     *
+     * Not white. This sits in a dark bedroom for eight hours a night, where
+     * full white on black is a lamp; a dimmed grey stays readable across the
+     * room without lighting it. Tunable because the right amount of dim is a
+     * matter of the room, not of the code.
+     */
+    val color: String = "#6E6E6E",
+    /** Show the date under the time. */
+    val showDate: Boolean = true,
+    /**
+     * Backlight while the clock is up, 0..1 — SEPARATE from the dock's dim level.
+     *
+     * It has to be, and this was not obvious until the clock had been running
+     * for an hour and looked like it had never started: the dock dims the
+     * dashboard to 1% because nobody is meant to read it, but a clock is meant
+     * to be read from across the room. At the dashboard's dim level the clock is
+     * rendering perfectly and is simply invisible.
+     */
+    val brightness: Float = 0.15f,
+    /** Per-remote overrides, keyed by the `device` slug in ConnectionConfig. */
+    val devices: Map<String, ScreensaverConfig> = emptyMap(),
+) {
+    fun forDevice(device: String): ScreensaverConfig =
         devices[device]?.copy(devices = emptyMap()) ?: copy(devices = emptyMap())
 }
 

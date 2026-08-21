@@ -386,6 +386,13 @@ pages:
       - name: 'Off'
         service: script.lr_lights_off
         active_value: 'Off'
+      # Last, like the bedroom's nightstands: a control rather than a choice, and
+      # the list reads as options until it stops being one. The fan's down-light
+      # is the one lamp in here no scene owns, so it is the one you end up
+      # reaching for the wall switch to adjust.
+      - type: light
+        entity_id: light.living_room_ceiling_fan_down_light
+        name: Fan Light
   - type: separator
     options:
       name: Shades

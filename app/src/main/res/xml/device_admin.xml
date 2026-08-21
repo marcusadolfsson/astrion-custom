@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declares the single policy we need: force-lock, i.e. the right to turn the
+  screen off. Nothing else is requested, so activating this admin grants no
+  ability to wipe, lock with a password, or manage the device.
+-->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies>
+        <force-lock />
+    </uses-policies>
+</device-admin>

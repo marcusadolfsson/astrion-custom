@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.ha.ServiceCall
+import com.custom.astrion.ui.OpenOverlays
 import com.custom.astrion.ui.ackColor
 import com.custom.astrion.ui.pressFeedback
 import com.custom.astrion.ui.rememberPressFeedback
@@ -45,6 +46,8 @@ fun LockKeypad(
     onDismiss: () -> Unit,
 ) {
     var entered by remember { mutableStateOf("") }
+    // Composed only while the keypad is up, so this is unconditionally open.
+    OpenOverlays.Track(true)
 
     // The lock opening IS the success signal.
     val locked = ctx.entities[lockEntity]?.state == "on"

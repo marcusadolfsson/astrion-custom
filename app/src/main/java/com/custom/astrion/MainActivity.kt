@@ -59,6 +59,7 @@ import com.custom.astrion.ha.BatteryReporter
 import com.custom.astrion.input.HardwareKeyRouter
 import com.custom.astrion.input.SleepAdminReceiver
 import com.custom.astrion.ui.Dashboard
+import com.custom.astrion.ui.OpenOverlays
 import com.custom.astrion.ui.Screensaver
 import com.custom.astrion.voice.MicProbe
 import com.custom.astrion.voice.VoiceSession
@@ -105,6 +106,9 @@ class MainActivity : ComponentActivity() {
 
         /** Below this, never hold the screen on, whatever the charger reports. */
         const val BATTERY_FLOOR_PCT = 15
+
+        /** How soon to re-check when a menu or dialog blocked the clock. */
+        const val OVERLAY_RETRY_MS = 3_000L
 
         // Motion-wake tuning moved to MotionWakeConfig (dashboard.yaml
         // `motion_wake:`, with per-remote blocks) -- the fixed values here could
@@ -291,6 +295,7 @@ class MainActivity : ComponentActivity() {
      */
     @Volatile private var charging = false
 
+
     private fun dockCfg() = dashboard.config.dockDisplay.forDevice(deviceName)
 
     /**
@@ -402,7 +407,16 @@ class MainActivity : ComponentActivity() {
         armScreensaver()
     }
 
-    private val showScreensaver = Runnable {
+    private val showScreensaver: Runnable = Runnable {
+        // Never raise the clock over someone mid-decision. An open dropdown or
+        // dialog keeps working, but the dashboard behind it turns into a black
+        // clock, which reads as the app having fallen over. Retry rather than
+        // cancel: the menu will close, and the idle time already spent still
+        // counts -- otherwise reading a long list would reset the timer.
+        if (OpenOverlays.any || settingsOpen || statusOpen) {
+            keyHandler.postDelayed(showScreensaver, OVERLAY_RETRY_MS)
+            return@Runnable
+        }
         if (saverCfg().enabled && charging) {
             screensaverOn = true
             // Re-apply so the backlight comes up to the clock's own level.
@@ -1410,9 +1424,10 @@ class MainActivity : ComponentActivity() {
         // over, which is both maddening and the opposite of the battery saving
         // the timeout exists for.
         val cfg = motionCfg()
-        // Docked remotes do not get woken by movement. A remote on charge is
-        // sitting still by definition, and the hand reaching for it will press
-        // something -- so the only motion it can see is the surface it shares.
+        // Off by default -- see MotionWakeConfig. A docked remote already has
+        // its screen held on, so the isInteractive check above has returned
+        // long before this, and "docked" cannot be told from "on a cable" on
+        // this hardware anyway.
         if (cfg.ignoreWhileCharging && charging) return
         if (SystemClock.elapsedRealtime() - screenOffAt < cfg.settleSeconds * 1000L) return
         val now = System.currentTimeMillis()

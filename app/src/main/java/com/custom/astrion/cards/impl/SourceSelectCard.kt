@@ -26,6 +26,7 @@ import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRenderer
 import com.custom.astrion.ha.ServiceCall
+import com.custom.astrion.ui.OpenOverlays
 
 /**
  * Source picker for a media_player: a compact row showing the current source,
@@ -56,6 +57,7 @@ class SourceSelectCard : CardRenderer {
         val current = e?.attrString("source")
 
         var expanded by remember { mutableStateOf(false) }
+        OpenOverlays.Track(expanded)
 
         Box {
             Row(

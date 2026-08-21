@@ -121,3 +121,25 @@ touched — so a poll is the only way to notice the state you are actually in.
 If a docked remote is losing charge, seat it fully home before suspecting the
 cradle, the cable or the PSU. On a plain USB-C cable the same remote charges
 normally, which is a quick way to tell the two apart.
+
+---
+
+## The dock and a USB-C charger are indistinguishable to software
+
+Worth knowing before designing anything around "is it parked in its cradle":
+you cannot tell. Measured on two remotes, one seated in its dock and one on a
+USB-C charger, both charging:
+
+    dumpsys battery      ->  AC powered: true      (both)
+    /sys/class/power_supply/ac/online   -> 1       (both)
+    /sys/class/power_supply/usb/online  -> 0       (both)
+
+`BATTERY_PLUGGED_AC` reflects the CHARGER type, not the connector: the cradle's
+pogo pins feed the same charging path as the port, and any dumb charger
+enumerates as Mains. A remote plugged into a data-capable host does report USB,
+but that distinguishes a computer from a charger — not a dock from a cable.
+
+The practical consequence is that "suppress this behaviour only while docked"
+is not implementable here. Where the intent is to avoid acting on a parked
+remote, gate on something you can actually observe instead — whether the screen
+is already on, or whether the device has been still.

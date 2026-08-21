@@ -39,6 +39,7 @@ import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRenderer
 import com.custom.astrion.ha.ServiceCall
+import com.custom.astrion.ui.OpenOverlays
 import com.custom.astrion.ui.ackColor
 import com.custom.astrion.ui.pressFeedback
 import com.custom.astrion.ui.rememberPressFeedback
@@ -104,6 +105,7 @@ class BubbleSelectCard : CardRenderer {
             ?: currentState ?: "—"
 
         var expanded by remember { mutableStateOf(false) }
+        OpenOverlays.Track(expanded)
 
         // When a hardware key scrolls to this bubble's (single-control) section,
         // pop the dropdown open too — the section name comes in via openTarget.
@@ -183,8 +185,25 @@ class BubbleSelectCard : CardRenderer {
             // Right-aligned dropdown with large touch targets (fat-finger sized).
             Box(modifier = Modifier.align(Alignment.TopEnd)) {
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    options.forEach { opt ->
-                        val label = opt["name"] as? String ?: return@forEach
+                    // Rule off the choices from the controls.
+                    //
+                    // Without it a slider sitting under a scene called "Off"
+                    // reads its own state as "Off" directly beneath it, and the
+                    // two look like the same kind of thing. They are not: one is
+                    // a choice you make, the other is a level a lamp happens to
+                    // be at. The line is what says so.
+                    val firstSlider = options.indexOfFirst { it["type"] == "light" }
+                    options.forEachIndexed { index, opt ->
+                        if (index == firstSlider && index > 0) {
+                            Box(
+                                Modifier
+                                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(Color(0x33FFFFFF))
+                            )
+                        }
+                        val label = opt["name"] as? String ?: return@forEachIndexed
                         // A `"type": "light"` entry is a brightness SLIDER, not a
                         // menu choice. It deliberately does NOT go through
                         // DropdownMenuItem: that consumes the gesture and closes
@@ -195,7 +214,7 @@ class BubbleSelectCard : CardRenderer {
                         // the whole drag.
                         if (opt["type"] == "light") {
                             LightSliderRow(opt, ctx)
-                            return@forEach
+                            return@forEachIndexed
                         }
                         val selected = opt["active_value"] == currentState
                         DropdownMenuItem(

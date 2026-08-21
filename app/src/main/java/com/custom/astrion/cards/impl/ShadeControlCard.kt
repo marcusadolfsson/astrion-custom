@@ -32,6 +32,7 @@ import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRenderer
 import com.custom.astrion.ha.ServiceCall
+import com.custom.astrion.ui.OpenOverlays
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -77,6 +78,7 @@ class ShadeControlCard : CardRenderer {
         }
 
         var expanded by remember { mutableStateOf(false) }
+        OpenOverlays.Track(expanded)
 
         Row(
             modifier = Modifier

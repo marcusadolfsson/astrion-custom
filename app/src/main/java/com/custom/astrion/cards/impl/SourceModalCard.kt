@@ -30,6 +30,7 @@ import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRenderer
 import com.custom.astrion.ha.ServiceCall
+import com.custom.astrion.ui.OpenOverlays
 
 /**
  * Full-screen modal picker over a media_player's live `source_list`.
@@ -87,6 +88,7 @@ class SourceModalCard : CardRenderer {
         val subtitle = config.string("subtitle_attr")?.let { e?.attrString(it) }
 
         var open by remember { mutableStateOf(false) }
+        OpenOverlays.Track(open)
 
         // Auto-open when a NEW result set arrives (see class doc).
         //

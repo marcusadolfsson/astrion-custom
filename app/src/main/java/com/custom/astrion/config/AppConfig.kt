@@ -115,13 +115,23 @@ data class MotionWakeConfig(
      */
     val windowMs: Long = 1200,
     /**
-     * Skip motion wake entirely while the remote is charging.
+     * Skip motion wake while the remote is on power. Off by default.
      *
-     * A docked remote does not need to be woken by movement: it is sitting
-     * still, and the hand that reaches for it will press something. This costs
-     * nothing when it is right and saves the whole problem when it is not.
+     * Off because it cannot be aimed at the case it was written for. The idea
+     * was to suppress wake-on-raise for a remote PARKED IN ITS DOCK while
+     * leaving it working for one on a cable in your hand -- but this hardware
+     * cannot tell those apart. Measured on two remotes, one docked and one on a
+     * USB-C charger: both report BATTERY_PLUGGED_AC, and both read
+     * `ac/online = 1`, `usb/online = 0` in sysfs. The cradle's pins feed the
+     * same charging path, and a dumb charger enumerates as Mains either way.
+     *
+     * It is also unnecessary. While docked, dock display holds the screen ON, so
+     * wakeScreen() returns at its own isInteractive check before this gate is
+     * reached. The only time the gate would bite is charging with the screen
+     * off -- below the battery floor, or with dock display disabled -- and those
+     * are exactly the times you would want a pick-up to wake it.
      */
-    val ignoreWhileCharging: Boolean = true,
+    val ignoreWhileCharging: Boolean = false,
     /** Per-remote overrides, keyed by the `device` slug in ConnectionConfig. */
     val devices: Map<String, MotionWakeConfig> = emptyMap(),
 ) {

@@ -46,6 +46,7 @@ import com.custom.astrion.ha.ServiceCall
 import com.custom.astrion.ui.ackColor
 import com.custom.astrion.ui.pressFeedback
 import com.custom.astrion.ui.rememberPressFeedback
+import com.custom.astrion.ui.OpenOverlays
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -190,6 +191,7 @@ class BubbleClimateCard : CardRenderer {
         }
 
         var picking by remember { mutableStateOf(false) }
+        OpenOverlays.Track(picking)
 
         Row(
             modifier = Modifier

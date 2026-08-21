@@ -887,9 +887,11 @@ motion_wake:
   hits: 2
   settle_seconds: 8
   cooldown_seconds: 2
-  # A docked remote is never woken by movement -- it is sitting still, and the
-  # hand that reaches for it will press something.
-  ignore_while_charging: true
+  # Off: a remote on a USB-C cable is usually in a hand, and this hardware cannot
+  # tell a cable from the dock -- both enumerate as Mains. Suppressing wake here
+  # would break the cable case to fix one that does not need fixing, since a
+  # docked remote already has its screen held on by dock_display.
+  ignore_while_charging: false
   devices:
     # The bed pair. A body-shift translates the remote without turning it, so the
     # tilt gate does most of the work here and these can now sit close to the

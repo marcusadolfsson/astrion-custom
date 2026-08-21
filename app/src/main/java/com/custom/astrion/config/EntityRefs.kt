@@ -57,6 +57,15 @@ object EntityRefs {
         // The page-control entity is written AND read by the app; without it here
         // the app would never see HA's page changes.
         config.pageEntity?.let { if (ENTITY_ID.matches(it)) out.add(it) }
+
+        // The screensaver's day/night entity is read outside any card, in the
+        // activity, so nothing else would ever ask for it -- and an unsubscribed
+        // entity is permanently null, which here would silently pin the clock to
+        // its night brightness. Collect every remote's, not just this one's:
+        // which device block applies is not known here.
+        (listOf(config.screensaver) + config.screensaver.devices.values).forEach { sv ->
+            sv.dayEntity?.let { if (ENTITY_ID.matches(it)) out.add(it) }
+        }
         // Status view cards are off the pager but still subscribe like any others.
         config.status?.cards?.forEach { walk(it.options, out) }
         return out

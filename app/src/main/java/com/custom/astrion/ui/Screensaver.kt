@@ -34,7 +34,12 @@ fun Screensaver(cfg: ScreensaverConfig) {
         SimpleDateFormat(if (cfg.clock24h) "HH:mm" else "h:mm", Locale.getDefault())
     }
     val amPmFmt = remember { SimpleDateFormat("a", Locale.getDefault()) }
-    val dateFmt = remember { SimpleDateFormat("EEEE d MMMM", Locale.getDefault()) }
+    val dateFmt = remember(cfg.dateFormat) {
+        // Falls back rather than throwing: a typo'd pattern in a config file
+        // should cost a wrong-looking date, not a blank screensaver.
+        runCatching { SimpleDateFormat(cfg.dateFormat, Locale.getDefault()) }
+            .getOrElse { SimpleDateFormat("EEEE MMMM d", Locale.getDefault()) }
+    }
 
     var now by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) {
@@ -60,7 +65,7 @@ fun Screensaver(cfg: ScreensaverConfig) {
                     timeFmt.format(now),
                     color = tint,
                     fontSize = 96.sp,
-                    fontWeight = FontWeight.Thin,
+                    fontWeight = FontWeight.Bold,
                 )
                 if (!cfg.clock24h) {
                     Spacer(Modifier.width(6.dp))

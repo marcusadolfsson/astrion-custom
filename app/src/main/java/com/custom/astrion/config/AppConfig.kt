@@ -191,6 +191,11 @@ data class ScreensaverConfig(
     /** Show the date under the time. */
     val showDate: Boolean = true,
     /**
+     * Date pattern, `SimpleDateFormat` syntax. Default is US order —
+     * weekday, month, day: "Friday August 21".
+     */
+    val dateFormat: String = "EEEE MMMM d",
+    /**
      * Backlight while the clock is up, 0..1 — SEPARATE from the dock's dim level.
      *
      * It has to be, and this was not obvious until the clock had been running
@@ -200,6 +205,26 @@ data class ScreensaverConfig(
      * rendering perfectly and is simply invisible.
      */
     val brightness: Float = 0.15f,
+    /**
+     * Backlight while [dayEntity] reads one of [dayStates] — the daytime level.
+     *
+     * A clock wants opposite things at opposite ends of the day: readable across
+     * a sunlit room, and not a lamp at 3am. One number cannot be both, so there
+     * are two and something outside decides which applies.
+     */
+    val dayBrightness: Float = 1.0f,
+    /**
+     * Entity that says whether it is daytime. Absent means always use
+     * [brightness], which is the safe direction to fail: dim.
+     *
+     * An entity rather than a clock time because the house already has an
+     * opinion about this and it drives the lighting; a second, independent
+     * definition of "night" would drift from the first and be wrong in exactly
+     * the season when it matters.
+     */
+    val dayEntity: String? = null,
+    /** States of [dayEntity] that count as daytime. */
+    val dayStates: List<String> = listOf("day"),
     /** Per-remote overrides, keyed by the `device` slug in ConnectionConfig. */
     val devices: Map<String, ScreensaverConfig> = emptyMap(),
 ) {

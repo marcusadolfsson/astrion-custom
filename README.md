@@ -126,7 +126,7 @@ a toolchain — but **adding a brand-new card type means compiling** (see
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
-adb install releases/astrion-custom-0.54.0.apk
+adb install releases/astrion-custom-0.55.3.apk
 ```
 
 **Option B — build from source.** You need:

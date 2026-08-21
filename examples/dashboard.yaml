@@ -906,22 +906,25 @@ motion_wake:
 # still sleeps, so this cannot cost battery. Enabled only on the bedroom pair;
 # the living-room remote sits in a room where a lit clock is not wanted.
 screensaver:
-  enabled: false
-  idle_seconds: 90
+  enabled: true
+  idle_seconds: 20
   clock_24h: false
   # Not white: this faces a bed for eight hours a night, and white on black at
   # full brightness is a lamp.
   color: '#8A8A8A'
   show_date: true
+  # US order: weekday, month, day.
+  date_format: 'EEEE MMMM d'
   # Its own backlight, well above the dock's 1% dashboard dim -- at that level
   # the clock renders perfectly and is invisible, which is exactly how it looked
   # like it had never started.
   brightness: 0.15
-  devices:
-    master_1:
-      enabled: true
-    master_2:
-      enabled: true
+  # Daytime is a different room: readable across it in sunlight. The house
+  # already decides when it is day for the lighting, so this follows that rather
+  # than inventing a second definition that would drift from the first.
+  day_brightness: 1.0
+  day_entity: input_select.lighting_time_period
+  day_states: ['day']
 
 dock_display:
   enabled: true

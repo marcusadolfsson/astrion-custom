@@ -932,6 +932,44 @@ at the lowest readable backlight; any touch or button raises it for
 `bright_seconds` and it fades back.
 
 ```yaml
+screensaver:
+  enabled: true
+  idle_seconds: 20
+  clock_24h: false
+  color: '#8A8A8A'
+  date_format: 'EEEE MMMM d'
+  brightness: 0.15          # night backlight, its OWN level
+  day_brightness: 1.0       # daytime backlight
+  day_entity: input_select.lighting_time_period
+  day_states: ['day']
+```
+
+Three things about it are worth copying, because each was a bug first.
+
+**The clock needs its own backlight.** Inheriting the dock's dim level made it
+look like the feature had never started — it was rendering perfectly at 2/255.
+A dashboard nobody reads and a clock read from across a room want opposite
+levels.
+
+**And two of them, chosen by something outside.** One number cannot be both
+readable in a sunlit room and not-a-lamp at 3am. `day_entity` names an entity
+that already knows — here the one that drives the house lighting, rather than a
+second definition of "night" that would drift from the first. It is re-checked
+while the clock is up, or a remote that went to its clock at dusk is still at
+daytime brightness at 3am. Missing or unknown falls to the DIM level: too dim is
+a squint, too bright is a light in someone's bedroom.
+
+**Losing power must clear it from both paths.** The obvious one is
+`ACTION_POWER_DISCONNECTED`. The one that bites is a dock that quietly stops
+delivering current: no broadcast fires at all, so the clock sits over the
+dashboard until someone touches it. The poll that notices must clear it too.
+
+Docking shows the clock immediately rather than starting the idle countdown —
+putting the remote down IS the answer that timer was waiting for. And where a
+clock is configured, the dock's fade-to-dim is skipped: dimming a dashboard on
+the way to replacing it is a middle state with no audience.
+
+```yaml
 dock_display:
   enabled: true
   dim_level: 0.02         # 0..1, idle on the dock

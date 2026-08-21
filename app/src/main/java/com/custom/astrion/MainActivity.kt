@@ -323,13 +323,28 @@ class MainActivity : ComponentActivity() {
             charging = readCharging() ?: charging
             if (charging != was) {
                 Log.i(KEY_TAG, "power state -> " + (if (charging) "charging" else "not charging"))
-                if (charging) onDocked() else { applyDockDisplay(); armScreensaver() }
+                if (charging) onDocked() else onUndocked()
             }
             keyHandler.postDelayed(this, 60_000)
         }
     }
 
     private fun saverCfg() = dashboard.config.screensaver.forDevice(deviceName)
+
+    /**
+     * The clock's backlight for right now: day level while the house says it is
+     * daytime, otherwise the night level.
+     *
+     * Falls to the NIGHT level whenever the entity is missing, unknown or not
+     * yet subscribed. That is the safe direction: being too dim is a squint,
+     * being too bright is a light in someone's bedroom at 3am.
+     */
+    private fun saverBrightness(): Float {
+        val cfg = saverCfg()
+        val e = cfg.dayEntity ?: return cfg.brightness
+        val state = client.entities.value[e]?.state ?: return cfg.brightness
+        return if (state in cfg.dayStates) cfg.dayBrightness else cfg.brightness
+    }
 
     /** True while the idle clock is covering the dashboard. */
     private var screensaverOn by mutableStateOf(false)
@@ -370,6 +385,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Power gone: drop the clock and show the dashboard at once.
+     *
+     * Taking the remote off its dock is someone reaching for it, so the useful
+     * thing is the pad, not the time. Shared with the watchdog rather than left
+     * in the broadcast handler alone: a dock that quietly stops delivering
+     * current sends no ACTION_POWER_DISCONNECTED at all -- which is precisely
+     * the failure this house has already had once -- and the clock would have
+     * sat over the dashboard until someone touched it.
+     */
+    private fun onUndocked() {
+        screensaverOn = false
+        keyHandler.removeCallbacks(showScreensaver)
+        applyDockDisplay()
+        armScreensaver()
+    }
+
     private val showScreensaver = Runnable {
         if (saverCfg().enabled && charging) {
             screensaverOn = true
@@ -393,12 +425,7 @@ class MainActivity : ComponentActivity() {
                 }
                 Intent.ACTION_SCREEN_OFF -> screenOffAt = SystemClock.elapsedRealtime()
                 Intent.ACTION_POWER_CONNECTED -> { charging = true; onDocked() }
-                Intent.ACTION_POWER_DISCONNECTED -> {
-                    charging = false
-                    screensaverOn = false
-                    applyDockDisplay()
-                    armScreensaver()
-                }
+                Intent.ACTION_POWER_DISCONNECTED -> { charging = false; onUndocked() }
             }
         }
     }
@@ -429,7 +456,7 @@ class MainActivity : ComponentActivity() {
                     // The clock gets its own level. The dock dims the DASHBOARD
                     // because nobody is meant to read it; the clock is the one
                     // thing on a docked remote that is.
-                    screensaverOn -> saverCfg().brightness.coerceIn(0.01f, 1f)
+                    screensaverOn -> saverBrightness().coerceIn(0.01f, 1f)
                     bright -> cfg.brightLevel.coerceIn(0.01f, 1f)
                     else -> cfg.dimLevel.coerceIn(0.01f, 1f)
                 }
@@ -465,7 +492,13 @@ class MainActivity : ComponentActivity() {
         }
         applyDockDisplay(bright = true)
         keyHandler.removeCallbacks(dockDimBack)
-        keyHandler.postDelayed(dockDimBack, dockCfg().brightSeconds * 1000L)
+        // Only fade to the dim DASHBOARD if no clock is coming. Where the clock
+        // is enabled, dimming first just adds a pointless middle state -- a
+        // dashboard nobody is reading, made harder to read -- on the way to the
+        // thing that replaces it.
+        if (!(saverCfg().enabled && charging)) {
+            keyHandler.postDelayed(dockDimBack, dockCfg().brightSeconds * 1000L)
+        }
     }
 
     /**
@@ -893,6 +926,25 @@ class MainActivity : ComponentActivity() {
         )
         bridge.start()
         battery.start()
+
+        // Follow the day/night entity while the clock is up.
+        //
+        // Without this the brightness is only decided when the clock APPEARS, so
+        // a remote that went to its clock at dusk would still be at the daytime
+        // level at 3am -- which is the exact failure the two levels exist to
+        // prevent. Only acts on a change, and only while the clock is showing.
+        lifecycleScope.launch {
+            var last: String? = null
+            while (true) {
+                val e = saverCfg().dayEntity
+                val now = e?.let { client.entities.value[it]?.state }
+                if (now != last) {
+                    last = now
+                    if (screensaverOn) applyDockDisplay()
+                }
+                delay(30_000)
+            }
+        }
         // Poll the client's flag for display only. A StateFlow would be tidier,
         // but the bridge is deliberately not load-bearing and this costs one
         // comparison a second.
@@ -1041,6 +1093,12 @@ class MainActivity : ComponentActivity() {
     private fun reloadDashboard() {
         applyDashboard(DashboardLoader.load())
         applyDockDisplay()
+        // Re-arm against the config we just adopted. The app renders from the
+        // CACHE at startup and fetches the live layout a moment later, so
+        // without this the first idle window after a settings change still
+        // counts out the old one -- which looks exactly like the change having
+        // been ignored.
+        armScreensaver()
     }
 
     /**

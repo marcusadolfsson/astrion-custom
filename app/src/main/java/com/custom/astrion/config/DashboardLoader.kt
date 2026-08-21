@@ -272,7 +272,12 @@ object DashboardLoader {
             clock24h = (j["clock_24h"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: base.clock24h,
             color = (j["color"] as? JsonPrimitive)?.content ?: base.color,
             showDate = (j["show_date"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: base.showDate,
+            dateFormat = (j["date_format"] as? JsonPrimitive)?.content ?: base.dateFormat,
             brightness = (j["brightness"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.brightness,
+            dayBrightness = (j["day_brightness"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: base.dayBrightness,
+            dayEntity = (j["day_entity"] as? JsonPrimitive)?.content ?: base.dayEntity,
+            dayStates = (j["day_states"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
+                ?: base.dayStates,
         )
         val global = one(o, d)
         val devices = (o["devices"] as? JsonObject)?.entries?.associate { (k, v) ->

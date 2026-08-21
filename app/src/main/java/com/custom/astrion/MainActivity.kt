@@ -323,8 +323,7 @@ class MainActivity : ComponentActivity() {
             charging = readCharging() ?: charging
             if (charging != was) {
                 Log.i(KEY_TAG, "power state -> " + (if (charging) "charging" else "not charging"))
-                applyDockDisplay()
-                armScreensaver()
+                if (charging) onDocked() else { applyDockDisplay(); armScreensaver() }
             }
             keyHandler.postDelayed(this, 60_000)
         }
@@ -350,6 +349,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Just docked: show the clock at once, no idle countdown.
+     *
+     * Putting the remote on its dock IS the answer the idle timer was asking
+     * for -- you are done with it. Counting out another ninety seconds of
+     * dashboard nobody is reading only delays the useful thing. Touching the
+     * screen still returns to the dashboard and re-arms the normal timer, so the
+     * delay is kept for the case it was written for: a pause in use, not the end
+     * of it.
+     */
+    private fun onDocked() {
+        applyDockDisplay()
+        keyHandler.removeCallbacks(showScreensaver)
+        if (saverCfg().enabled && charging) {
+            screensaverOn = true
+            applyDockDisplay()
+        } else {
+            armScreensaver()
+        }
+    }
+
     private val showScreensaver = Runnable {
         if (saverCfg().enabled && charging) {
             screensaverOn = true
@@ -372,7 +392,7 @@ class MainActivity : ComponentActivity() {
                     noteDockInteraction()
                 }
                 Intent.ACTION_SCREEN_OFF -> screenOffAt = SystemClock.elapsedRealtime()
-                Intent.ACTION_POWER_CONNECTED -> { charging = true; applyDockDisplay(); armScreensaver() }
+                Intent.ACTION_POWER_CONNECTED -> { charging = true; onDocked() }
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     charging = false
                     screensaverOn = false

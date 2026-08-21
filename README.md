@@ -91,6 +91,12 @@ accelerometer that reports 1.9 g at rest on one of ours.
 The HA100's USB-C port hides under the plastic strip on the bottom edge.
 **Undo the two small screws** and lift the strip off:
 
+> **If you leave the strip off, check the remote seats flush in its dock.**
+> Without it the pogo pins can make partial contact — enough for the charger to
+> be *detected*, not enough to charge. One here drained from 93% to flat
+> overnight reporting `AC powered: true` throughout. See
+> [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md#dock-with-the-usb-c-cover-removed-the-pins-only-meet-when-seated-flush).
+
 <img src="examples/screenshots/usb-c-port.jpeg" width="380" alt="USB-C port under the bottom strip">
 
 ### 2. Enable developer options

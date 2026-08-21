@@ -80,3 +80,44 @@ performed in production and can be re-run in the field (`/data/misc/sensor/`
 being empty on every unit suggests it may not be); whether `primary_offset` is
 the intended calibration mechanism and is field-writable; and whether the stock
 app compensates in software, which would explain how a unit ships this way.
+
+---
+
+## Dock: with the USB-C cover removed, the pins only meet when seated flush
+
+Getting at the USB-C port means undoing two screws and lifting the plastic strip
+off the bottom edge (see the README's install steps). Leave that strip off — as
+you will, if you ever want a cable again — and the remote no longer seats the
+same way in its cradle. The pogo pins then make **partial contact**: enough for
+the charger to be detected, not enough to deliver current.
+
+The failure is silent and looks like a software problem:
+
+    dumpsys battery
+      AC powered: true        <- a charger IS detected
+      status: 3               <- BATTERY_STATUS_DISCHARGING
+      level: 61               <- and falling
+
+A remote here went from 93% to flat overnight in this state — about 12%/hour —
+reporting `AC powered: true` the entire way down, because an app was holding its
+screen on and "plugged in" was taken to mean "charging".
+
+**Two things follow, and both are worth copying.**
+
+`EXTRA_PLUGGED` answers "is a cable attached". `EXTRA_STATUS` answers "is the
+battery gaining". They are not the same question, and on a dock like this they
+give opposite answers. Anything that decides to spend power — holding the screen
+on, running a bright screensaver — must gate on the second:
+
+    val i = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    val status = i?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+    val gaining = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                  status == BatteryManager.BATTERY_STATUS_FULL
+
+And re-check it periodically. No broadcast fires when a charger merely stops
+keeping up — `ACTION_POWER_CONNECTED` already fired, correctly, when the pins
+touched — so a poll is the only way to notice the state you are actually in.
+
+If a docked remote is losing charge, seat it fully home before suspecting the
+cradle, the cable or the PSU. On a plain USB-C cable the same remote charges
+normally, which is a quick way to tell the two apart.

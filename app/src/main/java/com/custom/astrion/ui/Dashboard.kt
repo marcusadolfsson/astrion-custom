@@ -1042,11 +1042,22 @@ private fun PageIndicator(
                 )
             }
             Spacer(Modifier.width(10.dp))
+            // Tapping the page name opens the device panel, same as swiping up.
+            // The swipe is a drag in a thin band at the very bottom edge and is
+            // genuinely hard to land on a 10" screen -- and it is the ONLY route
+            // to the panel, which is now also the only route out of the kiosk.
+            // A gesture that is occasionally unreachable is not acceptable for
+            // the exit hatch, so it gets a plain tap target as well. The dots
+            // keep their own job (switching pages); only the label does this.
             Text(
                 pages.getOrNull(current)?.name ?: "",
                 color = Color(0xFF93AFB6),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onSwipeUp() }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
     }

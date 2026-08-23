@@ -951,6 +951,14 @@ class MainActivity : ComponentActivity() {
                 android.app.admin.DevicePolicyManager.LOCK_TASK_FEATURE_NONE,
             )
         }.onFailure { Log.w(KEY_TAG, "lock task policy failed: ${it.message}") }
+        // Own HOME for as long as we are locked, so Home/gesture cannot reach
+        // another launcher. exitKiosk hands this back.
+        runCatching {
+            dpm.clearPackagePersistentPreferredActivities(adminComponent, packageName)
+            dpm.addPersistentPreferredActivity(
+                adminComponent, homeFilter(), ComponentName(this, MainActivity::class.java),
+            )
+        }.onFailure { Log.w(KEY_TAG, "could not claim HOME: ${it.message}") }
         if (!isKiosk()) runCatching { startLockTask() }
             .onFailure { Log.w(KEY_TAG, "startLockTask failed: ${it.message}") }
     }
@@ -960,16 +968,63 @@ class MainActivity : ComponentActivity() {
         return am.lockTaskModeState != android.app.ActivityManager.LOCK_TASK_MODE_NONE
     }
 
-    /** Correct PIN: drop out of lock task and stay out for the configured window. */
+    /** ACTION_MAIN + CATEGORY_HOME, the filter that decides which app is HOME. */
+    private fun homeFilter() = IntentFilter(Intent.ACTION_MAIN).apply {
+        addCategory(Intent.CATEGORY_HOME)
+        addCategory(Intent.CATEGORY_DEFAULT)
+    }
+
+    /** First HOME activity offered by [pkg], or null if it has none. */
+    private fun homeActivityOf(pkg: String): ComponentName? {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        return packageManager.queryIntentActivities(intent, 0)
+            .firstOrNull { it.activityInfo.packageName == pkg }
+            ?.let { ComponentName(it.activityInfo.packageName, it.activityInfo.name) }
+    }
+
+    /**
+     * Correct PIN: drop out of lock task, hand HOME back, and stay out for the
+     * configured window.
+     *
+     * Leaving lock task is not enough on its own -- this app is HOME, so the
+     * very next press of Home relaunched it and the exit looked like it had not
+     * worked. As device owner we can move the persistent preferred HOME
+     * activity, which is the same mechanism that pins it to us while locked.
+     */
     private fun exitKiosk() {
         kioskSuspendedUntil =
             System.currentTimeMillis() + dashboard.config.ui.kioskExitMinutes * 60_000L
         runCatching { stopLockTask() }
+        val handedBack = handHomeTo(dashboard.config.ui.kioskHomePackage)
         Toast.makeText(
             this,
-            "Kiosk off for ${dashboard.config.ui.kioskExitMinutes} min",
+            if (handedBack) "Kiosk off for ${dashboard.config.ui.kioskExitMinutes} min — Home returns to Android"
+            else "Kiosk off for ${dashboard.config.ui.kioskExitMinutes} min",
             Toast.LENGTH_LONG,
         ).show()
+        if (handedBack) {
+            runCatching {
+                startActivity(
+                    Intent(Intent.ACTION_MAIN)
+                        .addCategory(Intent.CATEGORY_HOME)
+                        .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+        }
+    }
+
+    /**
+     * Point HOME at [pkg] (blank = just release our claim). Returns true when
+     * another launcher actually took it, which is the only case where sending
+     * an ACTION_HOME intent would go anywhere but straight back here.
+     */
+    private fun handHomeTo(pkg: String): Boolean {
+        if (!dpm.isDeviceOwnerApp(packageName)) return false
+        runCatching { dpm.clearPackagePersistentPreferredActivities(adminComponent, packageName) }
+        val target = pkg.takeIf { it.isNotBlank() }?.let { homeActivityOf(it) } ?: return false
+        return runCatching {
+            dpm.addPersistentPreferredActivity(adminComponent, homeFilter(), target)
+        }.isSuccess
     }
 
     /**

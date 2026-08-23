@@ -31,9 +31,9 @@ import kotlinx.coroutines.delay
 /**
  * The way out of kiosk mode.
  *
- * Reached by tapping the clock a set number of times (see MainActivity), which
- * is deliberately undiscoverable: this is not a control, it is a service hatch,
- * and a visible "exit" button on a wall tablet is an invitation.
+ * Reached from "Exit kiosk" on the swipe-up device panel, which already takes a
+ * deliberate gesture to open and is where anyone servicing the tablet is looking
+ * anyway.
  *
  * The PIN is compared LOCALLY against the live state of the configured entity
  * (`input_text.tv_wall_lock_pin`, the same one the living-room screen unlock
@@ -59,9 +59,12 @@ fun KioskExitDialog(
     OpenOverlays.Track(true)
 
     // Blank/unset means the tablet would be locked with no way out, so an unset
-    // PIN falls back the same way the wall lock's automation does.
-    val expected = (ctx.entities[pinEntity]?.state ?: "")
-        .takeIf { it.isNotBlank() && it != "unknown" && it != "unavailable" } ?: "0000"
+    // PIN falls back the same way the wall lock's automation does -- but SAY SO.
+    // Silently accepting 0000 because the entity never arrived is how this shipped
+    // unprotected once already; a fallback you can see is a fallback you can fix.
+    val live = (ctx.entities[pinEntity]?.state ?: "")
+        .takeIf { it.isNotBlank() && it != "unknown" && it != "unavailable" }
+    val expected = live ?: "0000"
 
     // Checked on every keystroke rather than behind an "enter" key: the length
     // is known, so an extra confirm press is pure ceremony.
@@ -86,8 +89,16 @@ fun KioskExitDialog(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                if (wrong) "Wrong PIN" else "Exit kiosk",
-                color = if (wrong) Color(0xFFE06C6C) else Color(0xFF93AFB6),
+                when {
+                    wrong -> "Wrong PIN"
+                    live == null -> "Exit kiosk — default PIN"
+                    else -> "Exit kiosk"
+                },
+                color = when {
+                    wrong -> Color(0xFFE06C6C)
+                    live == null -> Color(0xFFE0A76C)
+                    else -> Color(0xFF93AFB6)
+                },
                 fontSize = 15.sp,
             )
             Spacer(Modifier.height(10.dp))

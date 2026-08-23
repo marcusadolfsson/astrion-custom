@@ -278,6 +278,8 @@ object DashboardLoader {
                 ?: d.kioskExitMinutes).coerceIn(1, 120),
             mediaArtMaxHeight = ((o["media_art_max_height"] as? JsonPrimitive)?.content?.toIntOrNull()
                 ?: d.mediaArtMaxHeight).coerceIn(0, 600),
+            kioskHomePackage = (o["kiosk_home_package"] as? JsonPrimitive)?.content
+                ?: d.kioskHomePackage,
         )
     }
 

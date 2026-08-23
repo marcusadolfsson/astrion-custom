@@ -105,7 +105,12 @@ class SeparatorCard : CardRenderer {
                     )
                 }
                 if (keypad && pinEntry != null) {
-                    LockKeypad(lockEntity, pinEntry, ctx) { keypad = false }
+                    LockKeypad(
+                        lockEntity,
+                        pinEntry,
+                        ctx,
+                        pinEntity = lock["pin_entity"] as? String ?: "",
+                    ) { keypad = false }
                 }
             }
         }

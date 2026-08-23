@@ -66,6 +66,12 @@ object EntityRefs {
         (listOf(config.screensaver) + config.screensaver.devices.values).forEach { sv ->
             sv.dayEntity?.let { if (ENTITY_ID.matches(it)) out.add(it) }
         }
+        // The kiosk exit PIN is read in a dialog, not a card, so nothing else
+        // asks for it -- and an unsubscribed entity is permanently null, which
+        // here silently dropped the check to its 0000 fallback: the real PIN was
+        // rejected and the default one let anyone out. Exactly the failure this
+        // file's over-collect bias exists to prevent.
+        config.ui.kioskPinEntity.let { if (ENTITY_ID.matches(it)) out.add(it) }
         // Status view cards are off the pager but still subscribe like any others.
         config.status?.cards?.forEach { walk(it.options, out) }
         return out

@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.custom.astrion.cards.CardContext
+import kotlinx.coroutines.delay
 import com.custom.astrion.ha.ServiceCall
 import com.custom.astrion.ui.OpenOverlays
 import com.custom.astrion.ui.ackColor
@@ -43,9 +44,18 @@ fun LockKeypad(
     lockEntity: String,
     pinEntry: String,
     ctx: CardContext,
+    /**
+     * The configured PIN, read only to say "wrong" locally. HA still does the
+     * real validation -- automation.tv_wall_validate_unlock_pin watches the
+     * scratchpad and flips the lock. Blank disables the message rather than
+     * guessing, because a keypad that calls a correct PIN wrong is worse than
+     * one that says nothing.
+     */
+    pinEntity: String = "",
     onDismiss: () -> Unit,
 ) {
     var entered by remember { mutableStateOf("") }
+    var wrong by remember { mutableStateOf(false) }
     // Composed only while the keypad is up, so this is unconditionally open.
     OpenOverlays.Track(true)
 
@@ -60,6 +70,22 @@ fun LockKeypad(
         )
     }
 
+    // A wrong PIN used to do nothing at all: the automation only acts on a
+    // match, so the dots just sat there and the only way to tell a mis-tap from
+    // a mis-remembered PIN was to wait and see if the lock opened. Say so, and
+    // clear -- HA is still the one that decides, this is only the message.
+    val expected = (ctx.entities[pinEntity]?.state ?: "")
+        .takeIf { it.isNotBlank() && it != "unknown" && it != "unavailable" }
+    LaunchedEffect(entered, expected) {
+        if (expected == null || entered.length < expected.length) return@LaunchedEffect
+        if (entered != expected) {
+            wrong = true
+            delay(600)
+            write("")
+            wrong = false
+        }
+    }
+
     Dialog(onDismissRequest = {
         // Leave the scratchpad clean for the next attempt.
         ctx.client.callService(ServiceCall.of("input_text", "set_value", pinEntry, "value" to ""))
@@ -72,15 +98,23 @@ fun LockKeypad(
                 .padding(horizontal = 18.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Enter PIN", color = Color(0xFF93AFB6), fontSize = 15.sp)
+            Text(
+                if (wrong) "Wrong PIN" else "Enter PIN",
+                color = if (wrong) Color(0xFFE06C6C) else Color(0xFF93AFB6),
+                fontSize = 15.sp,
+            )
             Spacer(Modifier.height(10.dp))
             // Dots, not digits: the PIN is shoulder-surfable on a screen held
             // at chest height in a room with other people in it.
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                repeat(maxOf(4, entered.length)) { i ->
+                repeat(maxOf(expected?.length ?: 4, entered.length)) { i ->
                     Box(
                         Modifier.size(12.dp).clip(CircleShape).background(
-                            if (i < entered.length) Color(0xFF4C8DFF) else Color(0xFF1E3841)
+                            when {
+                                wrong -> Color(0xFFE06C6C)
+                                i < entered.length -> Color(0xFF4C8DFF)
+                                else -> Color(0xFF1E3841)
+                            }
                         )
                     )
                 }

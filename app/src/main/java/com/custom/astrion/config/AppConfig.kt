@@ -133,6 +133,13 @@ data class UiConfig(
      * be affected by a value set for the tablet -- they share the card.
      */
     val mediaArtMaxHeight: Int = 0,
+    /**
+     * Package that takes HOME back when the kiosk is exited. Blank just
+     * releases our claim, which on a device where this app is also the chosen
+     * default launcher means Home comes straight back here -- i.e. the exit
+     * appears not to have worked, which is exactly what it looked like.
+     */
+    val kioskHomePackage: String = "",
 )
 
 data class MotionWakeConfig(

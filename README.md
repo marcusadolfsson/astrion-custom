@@ -9,6 +9,13 @@ whatever cards and layouts you define, and maps the remote's physical buttons to
 any action you want. Nothing depends on Sanytron's cloud or their HA integration
 — only a reachable HA instance and a long-lived token.
 
+It also runs on **an ordinary Android tablet**, from the same APK and the same
+layout document — a wall panel and a handheld remote off one configuration. What
+a tablet needs is presentation, not a second layout: lanes, a scale factor, a
+D-pad drawn on screen because there are no buttons to press, and kiosk lock so
+it cannot be swiped out of. See
+[Bigger screens](docs/FORK_ADDITIONS.md#bigger-screens-columns-scale-and-kiosk).
+
 > **This is a fork** of [baes-cloud/astrion-dashboard](https://github.com/baes-cloud/astrion-dashboard).
 > Jump to **[what this fork changes](#what-this-fork-changes)**.
 
@@ -52,6 +59,29 @@ one entity, so latching one releases the others. Here it decides which pane of a
 multi-view video wall the remote's physical keys drive — the card just writes a
 value, and Home Assistant decides what the keys do with it.
 
+| Now-playing strip | App / channel launcher | Library picker |
+|---|---|---|
+| ![Strip](examples/screenshots/22-media-strip.png) | ![Launcher](examples/screenshots/20-launcher-modal.png) | ![Library](examples/screenshots/21-library-picker.png) |
+
+A compact now-playing strip — art, title, launcher, no transport — because the
+full panel pushed the rest of the page off a 480×800 screen for something you
+only glance at. Its progress bar sits below the card and appears only when the
+source actually reports a duration.
+
+The launcher is one full-screen picker shared by three hosts (a pill on the
+page, a select row's trailing slot, the D-pad's corner). Each item names its own
+service, so one list can both open a streaming app and deep-link a channel, and
+it acts on whichever device the keys are currently driving. The third shot is
+the same picker with `columns: 1` — buttons and a several-hundred-row list in
+one scroll, with an A–Z rail you drag rather than 27 targets you cannot hit.
+
+### On a tablet
+
+![Tablet](examples/screenshots/19-tablet-dashboard.png)
+
+The same layout on a 10" tablet: three lanes, a drawn D-pad, kiosk-locked. The
+document is unchanged — only `ui:` differs.
+
 The layout behind these shots is [`examples/dashboard.yaml`](examples/dashboard.yaml)
 — a real, in-use configuration rather than a toy one.
 
@@ -64,12 +94,15 @@ layout) is unchanged. Each item below landed as its own commit.
 
 | Area | Change |
 |---|---|
-| **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional` |
+| **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional`, `dpad` |
 | **Changed cards** | `bubble_climate` rebuilt (hold indicator, mode + dual setpoints, scrolling picker), brightness sliders and a radio latch button inside `bubble_select`, `media_player` transport rework + auto-collapse + stale-metadata guard, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
 | **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
 | **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, swipe-up info panel, per-remote start page, tilt-based motion wake and dock display |
 | **Voice** | the VOICE key streams the mic to an endpoint you configure; ends on silence |
 | **UI** | dark theme so menus and dialogs stop arriving white, press feedback on controls that answer late, transient volume / mute overlay, voice indicator |
+| **Bigger screens** | runs on modern Android and on a tablet from the same APK: `ui.columns` lanes, `ui.scale`, `ui.padding`, landscape lock, a drawn `dpad`, kiosk lock with a PIN-gated exit |
+| **Launchers** | one shared full-screen picker: curated `items:` where each entry names its own service, `target_from:` resolved at tap time so a launcher follows the device you are driving, mixed button/list sections, an A–Z fast-scroller |
+| **Layout server** | `page_cards:` and `page_hotkeys:` merge per-device changes into a named page instead of restating it |
 | **Build** | signed, R8-minified release (16 MB → 1.3 MB), bounded Gradle heap |
 | **Performance** | filtered entity subscription, per-key entity observation, card-level pass |
 
@@ -126,7 +159,7 @@ a toolchain — but **adding a brand-new card type means compiling** (see
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
-adb install releases/astrion-custom-0.56.1.apk
+adb install releases/astrion-custom-0.87.0.apk
 ```
 
 **Option B — build from source.** You need:
@@ -455,6 +488,14 @@ voice:
 
 * Built for the **Astrion HA100** — 480×800, Android 8.1 (API 27, `minSdk` 26),
   1 GB RAM, MT6580 + Mali-400. Keep custom cards light.
+* Also runs on **modern Android** (tested on a Pixel Tablet): runtime receivers
+  carry an export flag, immersive mode uses `WindowInsetsControllerCompat`, and
+  the layout cache lives in app-private storage under scoped storage. Kiosk lock
+  needs **device owner**, which means a device with no account added yet —
+  without it the app claims HOME only.
+* The multi-column, scale and kiosk options are **presentation**: a remote
+  ignores `column:` entirely and renders the same page in document order, so one
+  layout document serves both.
 * The stock app stays installed as the launcher; this runs alongside it.
 * Upstream ships **no LICENSE file**, so no redistribution rights are granted
   beyond what GitHub's ToS allows for forks.

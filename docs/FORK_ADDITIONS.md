@@ -5,9 +5,15 @@ the order it is useful to read. Each item below landed as its own commit.
 
 Nothing here changes the upstream architecture — the open `CardRegistry` is still
 the extension point, and the layout is still a JSON document. The additions are
-five new card types, three new hotkey behaviours, runtime configuration (so the
+six new card types, three new hotkey behaviours, runtime configuration (so the
 APK carries no credentials), a release build, and a performance pass aimed at the
 HA100's hardware (1 GB RAM, MediaTek MT6580, Mali-400, Android 8.1).
+
+The app also runs on **a modern Android tablet** now, from the same APK and the
+same layout — see [Bigger screens](#bigger-screens-columns-scale-and-kiosk) and
+[The picker modal](#the-picker-modal). Everything a tablet needs is presentation:
+lanes, a scale factor, a drawn D-pad, and kiosk lock. None of it forks the
+layout.
 
 ---
 
@@ -1023,3 +1029,278 @@ token will be rejected again, so giving up looks reasonable — but "auth failed
 is equally what the app reports when the handshake is merely disturbed, and a
 wall-mounted remote that has to be relaunched by hand is the worst possible place
 to be permanently wrong about it.
+
+---
+
+## Bigger screens: columns, scale, and kiosk
+
+The app was written for a 480×800 remote held in one hand. On a 10" tablet that
+is one narrow column down the middle of a very empty screen. These options make
+the same layout fill a bigger one — they are presentation only, so **one layout
+document still serves every device**.
+
+```yaml
+ui:
+  columns: 3            # split each page into lanes
+  scale: 0.8            # re-scale every card at once
+  padding: 14           # inset the page
+  landscape: true       # lock orientation
+  media_art_max_height: 200
+```
+
+A card picks its lane with `column:`. A `separator` **claims** the lane for the
+section it opens, so the cards under it follow without repeating themselves —
+which keeps a layout that is really about sections from turning into a per-card
+table. `column:` is read ONLY when `columns > 1`, so a remote ignores it
+entirely and renders the same page as one column, in document order.
+
+`scale` goes through `LocalDensity` rather than adding a size option to every
+card type: one number moves the whole UI, and a new card type inherits it
+without knowing it exists.
+
+`media_art_max_height` exists because a square poster given a whole lane grows
+to the height of the screen.
+
+### Kiosk
+
+```yaml
+ui:
+  kiosk: true
+  kiosk_pin_entity: input_text.wall_pin
+  kiosk_home_package: com.google.android.apps.nexuslauncher
+  kiosk_exit_minutes: 5
+```
+
+With **device-owner** privilege the app enters lock task mode with every
+lock-task feature disabled and claims HOME, so it survives a reboot. Without
+that privilege it degrades to claiming HOME only, rather than pretending.
+
+Leaving is deliberate: a PIN prompt, read from a HA entity so it is the same
+secret as everything else rather than a second one to remember.
+
+**Exiting has to hand HOME back.** The first version dropped you onto the
+launcher the app had claimed — itself — so it relaunched instantly and the exit
+did nothing you could see. It now hands HOME to `kiosk_home_package` and
+suspends the kiosk for `kiosk_exit_minutes`.
+
+Two traps worth knowing before you debug this:
+
+- **`am force-stop` is silently refused under lock task.** No error, no effect.
+  It will make a change you just deployed look like it did not deploy.
+- Entity references nested inside options must be collected for subscription.
+  The PIN check accepted only its fallback for a while because the entity
+  holding the real PIN was never subscribed, so it read empty every time.
+
+---
+
+## `dpad`
+
+A tablet has no buttons, so this draws them.
+
+```json
+{ "type": "dpad",
+  "options": { "key_size": 84, "back": true, "volume": true, "skip": true,
+               "rows": [ [ {"key": "LIGHT", "label": "◀◀"},
+                           {"key": "CURTAIN", "label": "Play/Pause",
+                            "icon": "play_pause", "wide": true},
+                           {"key": "AC", "label": "▶▶"} ] ],
+               "drawer": { "name": "Apple TV", "columns": 6,
+                           "items": [ … ] } } }
+```
+
+It fires the app's **logical hardware keys** through the same router the physical
+ones use, rather than calling services directly. That is the whole design: it
+inherits the layout's `hotkeys:`, including page-scoped ones, so a drawn pad
+cannot drift from a moulded one and needs no per-device wiring of its own.
+
+- `back` puts Back and Menu **above** the pad, as icons. Below it they were the
+  last thing the eye reached on the control you look at first, and spelled out
+  they were two of the widest elements on a pad whose whole point is big round
+  targets.
+- `volume` and `skip` flank the pad as **columns**, not extra rows, which keeps
+  the pad itself large — on a wall tablet it is the thing you aim at without
+  looking.
+- `rows:` adds arbitrary rows of `{key, label, wide, icon}`. `icon:` draws a
+  glyph instead of the label and keeps the label as the accessibility
+  description; it resolves against a fixed set, so a name that is not in it
+  falls back to the label — still a perfectly good button.
+- `drawer:` puts a launcher in the pad's corner (see below).
+
+---
+
+## The picker modal
+
+One full-screen picker, used by three different hosts so they cannot drift: a
+pill on the page, the trailing slot of a `bubble_select` row, and the corner of
+a `dpad`. All three go through the same shared button, which owns the rules for
+when a launcher should not be offered at all.
+
+### Curated items
+
+```yaml
+launcher:
+  name: Apple TV
+  columns: 3
+  target_from: sensor.key_target_media_player
+  items:
+    - name: Netflix
+      image: /local/logos/netflix.png
+      service: media_player.select_source
+      data: {source: Netflix}
+    - {name: Browse, section: Channels, section_columns: 3, …}
+```
+
+`items:` replaces an entity's live list, and **each entry names its own
+service**. That is what lets a single list both select a streaming app and
+deep-link a channel.
+
+`target_from:` names an entity whose STATE is the `media_player` to act on, and
+it is resolved **at tap time**. That is what makes one launcher follow whichever
+device the keys are currently driving instead of always hitting the first one.
+
+A launcher **hides itself** when `target_from` resolves to nothing. There is no
+second condition to keep in sync, because "nothing to launch onto" *is* the
+signal. An early local copy of the button skipped that test and offered one
+source's app list while a different source was playing — one tap from switching
+a device out from under something that was running.
+
+`entity_id` is required only for a LIVE list. Returning early on a missing one
+made a perfectly valid curated card render nothing at all.
+
+### Layout
+
+`columns: 1` renders a **list** — left-aligned, wrapping, sized to its text.
+Anything higher renders tiles. A section can override the modal's count with
+`section_columns:`, and the whole thing stays ONE grid with per-item spans,
+which is what lets a row of three-across buttons sit above a several-hundred-row
+list in the same scroll.
+
+**Fixed tile height is load-bearing for images.** `ContentScale.Fit` scales to
+the smaller of the two ratios, so an unbounded height draws a small logo at
+natural size in a tile five times as wide. Text tiles get a *minimum* instead,
+so a two-line label grows rather than truncating — except in button sections,
+where a single line is deliberate: a wrapped label makes the whole row of
+buttons grow to match it.
+
+**Logo tiles are drawn on a light background.** Brand marks are made for white;
+on a dark chip about half of them were invisible rather than subtle.
+
+### The A–Z rail
+
+Appears when a list section has enough distinct letters. It is a
+**fast-scroller, not 27 buttons**: 27 letters sharing one screen gives each
+about 3 mm, which no thumb hits. It takes press *and* drag anywhere along it,
+maps the y position to a letter, scrolls live, and shows a large preview bubble
+of wherever the finger is — so you can land near S, see that you got R, and
+slide without lifting.
+
+Two earlier versions of this "worked" under `adb input tap` and failed under a
+real finger. An injected tap at the exact glyph centre proves the handler is
+wired; it says nothing about whether the target is reachable.
+
+### Hardware keys over a modal
+
+A Compose `Dialog` is its **own window**, so keys never reach the activity and
+Android's defaults take them — the volume rocker moved ANDROID's media volume
+instead of the speaker the layout binds it to. The dialog's window callback is
+wrapped and offers keys to the activity first.
+
+Two silent null casts made this ship broken twice, both worth remembering:
+
+- `LocalView.current.parent as? DialogWindowProvider` — the recipe you find
+  everywhere — yields **null**; the compose view sits deeper than one level
+  inside the dialog. Walk the parent chain.
+- `LocalContext.current as? Activity` yields **null** inside a Dialog, where the
+  context is a `ContextWrapper` around the activity. Unwrap it.
+
+It logs whether it attached, because "looks right, changes nothing" is exactly
+how it shipped twice.
+
+**BACK is deliberately NOT forwarded.** It is typically bound to a source
+device's back action, and forwarding it stepped that device back while leaving
+the modal open. In a modal, BACK closes the modal.
+
+---
+
+## `media_player`: `variant: strip`
+
+About a fifth the height of `variant: full`: art, title, launcher, no transport.
+On a 480×800 screen the full panel pushed the rest of the page off for something
+you only glance at.
+
+```json
+{ "type": "media_player",
+  "options": { "entity_id": "media_player.…", "variant": "strip",
+               "art_size": 68, "launcher": { … } } }
+```
+
+Unlike `full`, it does **not** hide when idle: this row is what tells you the
+source is up at all, so it says "Nothing playing" instead of vanishing.
+
+The progress bar sits **below** the card, not inside it — inside, it read as
+part of the poster. It draws only when the source reports a duration, because no
+bar beats one stuck at zero, which reads as broken rather than unreported.
+Position is **interpolated** on a tick, since most integrations update that
+attribute every few seconds at best and some only on state changes.
+
+---
+
+## Layout server: per-device page overrides
+
+The optional Home Assistant component serves one YAML layout and shallow-merges
+a per-device override over it. Shallow means `pages:` is all-or-nothing, so a
+device wanting one extra card had to restate the whole page list — and every
+later edit to the shared layout had to be made twice. Two narrow keys fix the
+cases that actually come up.
+
+### `page_cards:`
+
+```yaml
+page_cards:
+  Living Room:
+    prepend: [ {type: separator, options: {name: Remote Controls, column: 3}} ]
+    append:  [ {type: dpad, options: {…}} ]
+```
+
+### `page_hotkeys:`
+
+```yaml
+page_hotkeys:
+  Master Bedroom:
+    - {key: CURTAIN, service: script.bedroom_play_pause, quiet: true}
+```
+
+A page's own `hotkeys:` are shared by every device showing that page, which is
+wrong for keys whose **legend differs per unit**. The HA100A prints
+LIGHT / SHADE / MUSIC / AC on four keys where the HA100B prints
+SCAN / PLAY-PAUSE / STOP / SCAN FWD — same keycodes, different meaning — so a
+page that bound them to `scroll_to:` for one variant left the other variant's
+button marked "Play/Pause" scrolling the page.
+
+**`page_hotkeys` merges BY KEY**, unlike top-level `hotkeys:`, which replaces
+the list outright. An override here is a correction to a handful of keys, and
+restating a twenty-key page list to change four of them is how one of the other
+sixteen quietly goes missing.
+
+Both match by page **name**, not index, so they survive reordering, and an
+unknown name is an **error** rather than a silent no-op — a typo that does
+nothing is the failure mode the whole file exists to avoid.
+
+---
+
+## Running on modern Android
+
+The app targeted Android 8.1 and crashed instantly on anything recent.
+
+- **Android 14 requires an explicit export flag** on every runtime-registered
+  receiver. The app registered one without it. Android 8.1 was perfectly happy;
+  a modern device died at launch. Registration goes through `ContextCompat` now.
+- **Immersive mode** is rewritten on `WindowInsetsControllerCompat`. The old
+  `systemUiVisibility` flags have been ignored since Android 11, so the
+  navigation bar simply stayed.
+- **Scoped storage** makes app-private storage the only writable choice for the
+  layout cache. Two bugs came out of that move: the cache write sat INSIDE the
+  parse `try`, so a failed write discarded a layout that had parsed perfectly
+  and the app fell back to its compiled-in demo; and the legacy path is now read
+  once to seed the new one, so an existing device keeps its layout across the
+  upgrade.

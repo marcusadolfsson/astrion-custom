@@ -313,36 +313,12 @@ class MainActivity : ComponentActivity() {
      */
     private fun readCharging(): Boolean? {
         val i = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return null
-        val status = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-        val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-        val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
-        val pct = if (level < 0) 100 else level * 100 / scale
-        if (pct < BATTERY_FLOOR_PCT) return false
-        return when (status) {
-            BatteryManager.BATTERY_STATUS_CHARGING,
-            BatteryManager.BATTERY_STATUS_FULL,
-            -> true
-            // NOT_CHARGING while a charger is attached is a THIRD case, and
-            // missing it cost the Pixel Tablet both its clock and its backlight.
-            //
-            // The HA100's bedside dock only ever charges or loses ground, so
-            // CHARGING/FULL covered it. A Pixel Tablet on its own dock reports
-            // `Dock powered: true` with status NOT_CHARGING at 90%, because it
-            // deliberately HOLDS the level for battery health rather than
-            // topping up. Read as "the dock cannot carry it", so the screen was
-            // never held on and the idle clock -- which needs the same flag --
-            // never armed. The tablet simply went dark after Android's timeout.
-            //
-            // Plugged-and-not-charging means the charger IS carrying the device;
-            // it is just not adding to it. The case the original fix existed for
-            // reports DISCHARGING, which is still false here, and the per-minute
-            // watchdog plus BATTERY_FLOOR_PCT still catch a dock that starts
-            // losing ground.
-            BatteryManager.BATTERY_STATUS_NOT_CHARGING ->
-                i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
-            // DISCHARGING, UNKNOWN.
-            else -> false
-        }
+        val pct = DockPower.percent(i)
+        // The floor is dock-display POLICY, not part of "is mains carrying it":
+        // it stops a dock that is losing ground from holding the screen on all
+        // the way to empty. The power rule itself lives in DockPower.
+        if (pct in 0 until BATTERY_FLOOR_PCT) return false
+        return DockPower.isCarried(i)
     }
 
     /**
@@ -1162,7 +1138,7 @@ class MainActivity : ComponentActivity() {
             },
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
-        bridge.start()
+        applyBridge()
         battery.start()
 
         // Follow the day/night entity while the clock is up.
@@ -1332,10 +1308,31 @@ class MainActivity : ComponentActivity() {
         applyDockDisplay()
     }
 
+    /** Whether the bridge client is currently running, so applyBridge is idempotent. */
+    private var bridgeRunning = false
+
+    /**
+     * Start or stop the bridge client to match the layout.
+     *
+     * Called on every reload, not only at startup: the app renders from the
+     * CACHE first and fetches the live layout a moment later, so a device told
+     * for the first time that it has no bridge would otherwise keep retrying
+     * until the next restart -- and look exactly like the setting being
+     * ignored. Same reasoning as re-arming the screensaver here.
+     */
+    private fun applyBridge() {
+        val want = dashboard.config.ui.inputBridge
+        if (want == bridgeRunning) return
+        bridgeRunning = want
+        if (want) bridge.start() else bridge.stop()
+        Log.i(KEY_TAG, "input bridge " + (if (want) "started" else "stopped"))
+    }
+
     /** Load config from the local cache and apply it. Synchronous — tiny file. */
     private fun reloadDashboard() {
         applyDashboard(DashboardLoader.load())
         applyDockDisplay()
+        applyBridge()
         // Re-arm against the config we just adopted. The app renders from the
         // CACHE at startup and fetches the live layout a moment later, so
         // without this the first idle window after a settings change still

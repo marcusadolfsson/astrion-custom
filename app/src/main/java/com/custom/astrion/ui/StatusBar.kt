@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
+import com.custom.astrion.DockPower
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -79,9 +80,9 @@ fun StatusBar(
                 val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
                 val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
                 if (level >= 0 && scale > 0) batteryPct = (level * 100f / scale).toInt()
-                val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-                charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                    status == BatteryManager.BATTERY_STATUS_FULL
+                // Shared rule: a dock that HOLDS the level still counts, or the
+                // bolt disappears on a tablet that is plainly on mains.
+                charging = DockPower.isCarried(intent)
             }
         }
         val sticky = context.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))

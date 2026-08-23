@@ -140,6 +140,16 @@ data class UiConfig(
      * appears not to have worked, which is exactly what it looked like.
      */
     val kioskHomePackage: String = "",
+    /**
+     * Connect to the evdev input bridge.
+     *
+     * True for a remote, whose physical keys only reach the app through it.
+     * False for a device that has no keys to bridge: the client retries a
+     * refused localhost connection every three seconds forever -- correct on a
+     * remote where the bridge may start at any time, pure noise on a tablet
+     * where it never will, and enough of it to bury the log you are reading.
+     */
+    val inputBridge: Boolean = true,
 )
 
 data class MotionWakeConfig(

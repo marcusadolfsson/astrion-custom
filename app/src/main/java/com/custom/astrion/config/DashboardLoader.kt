@@ -280,6 +280,8 @@ object DashboardLoader {
                 ?: d.mediaArtMaxHeight).coerceIn(0, 600),
             kioskHomePackage = (o["kiosk_home_package"] as? JsonPrimitive)?.content
                 ?: d.kioskHomePackage,
+            inputBridge = (o["input_bridge"] as? JsonPrimitive)?.content
+                ?.toBooleanStrictOrNull() ?: d.inputBridge,
         )
     }
 

@@ -76,7 +76,13 @@ class BridgeClient(
         if (started) return
         started = true
         scope.launch(Dispatchers.IO) {
-            while (isActive) {
+            // `started` as well as isActive: stop() has to be able to END this
+            // loop, not merely drop the current socket. isActive follows the
+            // ACTIVITY's scope, which outlives any one bridge session, so a
+            // stop() that only closed the socket left the loop reconnecting
+            // every 3s forever -- which is exactly what it looked like on a
+            // device that had just been told not to use the bridge at all.
+            while (isActive && started) {
                 try {
                     Socket().use { sock ->
                         socket = sock

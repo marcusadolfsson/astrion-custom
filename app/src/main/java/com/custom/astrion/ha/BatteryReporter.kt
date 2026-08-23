@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
+import com.custom.astrion.DockPower
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,19 +47,20 @@ class BatteryReporter(
     private var level: Int = -1
     private var charging: Boolean = false
     private var lastPosted: Int = -1
+    /** Last docked value published, so an unchanged one is not re-sent. */
+    private var lastDocked: Boolean? = null
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
             if (intent == null) return
-            val raw = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-            if (raw >= 0 && scale > 0) level = (raw * 100f / scale).toInt()
-            val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-            charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                status == BatteryManager.BATTERY_STATUS_FULL
+            val pct = DockPower.percent(intent)
+            if (pct >= 0) level = pct
+            // Shared rule -- see DockPower. This used to be its own copy of
+            // CHARGING||FULL, which called a docked tablet "not charging".
+            charging = DockPower.isCarried(intent)
             // Publish immediately on a level change so the curve keeps its
             // shape; the timer below is only a heartbeat for when nothing moves.
-            if (level != lastPosted) post()
+            if (level != lastPosted || charging != lastDocked) post()
         }
     }
 
@@ -96,7 +98,32 @@ class BatteryReporter(
         client.callService(
             ServiceCall.of("input_number", "set_value", entityId, "value" to level)
         )
-        Log.d(TAG, "posted $level% to $entityId (charging=$charging)")
+        // Docked as its own entity, because the level alone cannot express it.
+        // A docked panel sits at a flat 90% and so does one that was unplugged
+        // a minute ago; only this distinguishes "on its dock" from "running
+        // down on a shelf", which is the thing worth alerting on for a device
+        // that is supposed to be on mains permanently.
+        // Re-asserted on EVERY post, not only when it changes -- exactly like
+        // the level above. Sending only on change means one lost call leaves
+        // the entity wrong forever, and calls DO get lost: the first post can
+        // land before the socket is authenticated, where sends are queued and
+        // the queue drops its oldest. Two remotes sat reading "not docked"
+        // while plainly sitting on their docks because of that. Re-asserting
+        // costs one service call per heartbeat, which is what the level already
+        // costs, and makes a hand-toggled helper heal itself.
+        lastDocked = charging
+        val dockEntity = entityId.replace("_battery", "_docked")
+            .replace("input_number.", "input_boolean.")
+        val dockService = if (charging) "turn_on" else "turn_off"
+        Log.i(TAG, "docked -> input_boolean.$dockService $dockEntity")
+        client.callService(
+            ServiceCall(
+                domain = "input_boolean",
+                service = dockService,
+                entityId = dockEntity,
+            )
+        )
+        Log.d(TAG, "posted $level% to $entityId (docked=$charging)")
     }
 
     companion object {

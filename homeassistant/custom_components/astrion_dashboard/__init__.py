@@ -172,7 +172,8 @@ class AstrionDashboardView(HomeAssistantView):
                 f"{os.path.basename(override)} and the base layout must both be mappings"
             )
         merged = {**data, **patch}
-        return self._apply_page_cards(merged, os.path.basename(override))
+        who = os.path.basename(override)
+        return self._apply_page_hotkeys(self._apply_page_cards(merged, who), who)
 
     @staticmethod
     def _apply_page_cards(merged: dict, who: str) -> dict:
@@ -212,5 +213,64 @@ class AstrionDashboardView(HomeAssistantView):
             before = list((spec or {}).get("prepend") or [])
             after = list((spec or {}).get("append") or [])
             page["cards"] = before + list(page.get("cards") or []) + after
+        merged["pages"] = pages
+        return merged
+
+    @staticmethod
+    def _apply_page_hotkeys(merged: dict, who: str) -> dict:
+        """Override individual page-scoped hotkeys for one device.
+
+        A page's `hotkeys:` are shared by every remote showing that page, which
+        is wrong for the four keys whose LEGEND differs per unit. The Master
+        Bedroom page binds LIGHT/CURTAIN/SCENE/AC to `scroll_to:` -- correct for
+        Astrion 1, whose plastic reads LIGHT/SHADE/MUSIC/AC, and wrong for every
+        B unit, where those same keycodes are printed SCAN / PLAY-PAUSE / STOP /
+        SCAN FWD. A B unit on that page had its transport keys scrolling the
+        page instead of driving the source.
+
+            page_hotkeys:
+              Master Bedroom:
+                - {key: CURTAIN, service: script.mb_av_play_pause, quiet: true}
+
+        Merged BY KEY, unlike top-level `hotkeys:` which replaces the list
+        outright: an override here is a correction to a handful of keys, and
+        restating a 20-key page list to change four of them is how one of the
+        other sixteen quietly goes missing. An entry for a key the page does not
+        bind is appended.
+        """
+        spec_all = merged.pop("page_hotkeys", None)
+        if not spec_all:
+            return merged
+        if not isinstance(spec_all, dict):
+            raise ValueError(
+                f"{who}: page_hotkeys must be a mapping of page name -> hotkeys"
+            )
+        pages = [dict(p) for p in (merged.get("pages") or [])]
+        by_name = {str(p.get("name", "")).casefold(): p for p in pages}
+        for name, entries in spec_all.items():
+            page = by_name.get(str(name).casefold())
+            if page is None:
+                raise ValueError(
+                    f"{who}: page_hotkeys names {name!r}, which is not a page in "
+                    "the base layout"
+                )
+            if not isinstance(entries, list):
+                raise ValueError(
+                    f"{who}: page_hotkeys[{name!r}] must be a list of hotkeys"
+                )
+            base = [dict(h) for h in (page.get("hotkeys") or [])]
+            at = {str(h.get("key")): i for i, h in enumerate(base) if h.get("key")}
+            for entry in entries:
+                key = str((entry or {}).get("key", ""))
+                if not key:
+                    raise ValueError(
+                        f"{who}: a page_hotkeys entry for {name!r} has no `key`"
+                    )
+                if key in at:
+                    base[at[key]] = dict(entry)
+                else:
+                    at[key] = len(base)
+                    base.append(dict(entry))
+            page["hotkeys"] = base
         merged["pages"] = pages
         return merged

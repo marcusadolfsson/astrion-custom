@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -29,6 +31,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -108,6 +117,17 @@ object DpadCard : CardRenderer {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            // Back and Menu ABOVE the pad, as icons. Below it they were the last
+            // thing the eye reached on a control you look at first, and spelled
+            // out they were two of the widest elements on a pad whose point is
+            // big round targets.
+            if (showBack) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill(ctx, HardwareKey.BACK, "Back", icon = Icons.AutoMirrored.Filled.ArrowBack, width = 82)
+                    Pill(ctx, HardwareKey.MENU, "Menu", icon = Icons.Filled.Menu, width = 82)
+                }
+            }
+
             // Pad in the middle, volume down the left, skip down the right.
             // Flanking columns rather than extra rows: they keep the pad itself
             // big, and on a wall tablet the pad is the thing you aim at without
@@ -116,10 +136,10 @@ object DpadCard : CardRenderer {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                if (showVolume) {
+                if (showSkip) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Pill(ctx, HardwareKey.VOLUME_UP, "Vol +", width = 82)
-                        Pill(ctx, HardwareKey.VOLUME_DOWN, "Vol −", width = 82)
+                        Pill(ctx, HardwareKey.PAGE_UP, "Next", width = 82)
+                        Pill(ctx, HardwareKey.PAGE_DOWN, "Prev", width = 82)
                     }
                 }
                 Column(
@@ -140,20 +160,11 @@ object DpadCard : CardRenderer {
                     }
                     Key(ctx, HardwareKey.DOWN, Icons.Filled.KeyboardArrowDown, size = keySize)
                 }
-                if (showSkip) {
+                if (showVolume) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Pill(ctx, HardwareKey.PAGE_UP, "Next", width = 82)
-                        Pill(ctx, HardwareKey.PAGE_DOWN, "Prev", width = 82)
+                        Pill(ctx, HardwareKey.VOLUME_UP, "Vol +", width = 82)
+                        Pill(ctx, HardwareKey.VOLUME_DOWN, "Vol −", width = 82)
                     }
-                }
-            }
-
-            // Back and Menu BELOW the pad. Flanking it, they competed with the
-            // pad for the same reach and pushed the arrows inward.
-            if (showBack) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Pill(ctx, HardwareKey.BACK, "Back")
-                    Pill(ctx, HardwareKey.MENU, "Menu")
                 }
             }
 
@@ -167,7 +178,7 @@ object DpadCard : CardRenderer {
                 Spacer(Modifier.size(2.dp))
                 rows.forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        row.forEach { b -> Pill(ctx, b.key, b.label, b.wide) }
+                        row.forEach { b -> Pill(ctx, b.key, b.label, b.wide, icon = b.icon) }
                     }
                 }
             } else if (showTransport) {
@@ -193,10 +204,38 @@ object DpadCard : CardRenderer {
         }
     }
 
-    private data class Btn(val key: HardwareKey, val label: String, val wide: Boolean)
+    private data class Btn(
+        val key: HardwareKey,
+        val label: String,
+        val wide: Boolean,
+        /** Drawn INSTEAD of the label; the label stays as the a11y description. */
+        val icon: ImageVector? = null,
+    )
 
     /**
-     * `rows:` is a list of rows, each a list of `{key, label, wide}`. An
+     * The names `icon:` accepts on a row button.
+     *
+     * A fixed set rather than a free-form Material name: the layout is authored
+     * against whatever this app already bundles, and a typo here should fall
+     * back to the label -- which is still a perfectly good button -- instead of
+     * failing to resolve at runtime.
+     */
+    private val ROW_ICONS = mapOf(
+        // No single Material glyph means "play/pause", and the pad fires a
+        // logical key rather than watching a player, so it has no state to
+        // reflect. PlayArrow is the conventional stand-in on a transport pad.
+        "play_pause" to Icons.Filled.PlayArrow,
+        "play" to Icons.Filled.PlayArrow,
+        "pause" to Icons.Filled.Pause,
+        "stop" to Icons.Filled.Stop,
+        "rewind" to Icons.Filled.FastRewind,
+        "forward" to Icons.Filled.FastForward,
+        "prev" to Icons.Filled.SkipPrevious,
+        "next" to Icons.Filled.SkipNext,
+    )
+
+    /**
+     * `rows:` is a list of rows, each a list of `{key, label, wide, icon}`. An
      * unrecognised key name drops that button rather than the whole card -- a
      * typo should cost one pill, not the navigation pad you are looking at.
      */
@@ -212,6 +251,7 @@ object DpadCard : CardRenderer {
                     key = key,
                     label = (m["label"] as? String) ?: key.name,
                     wide = (m["wide"] as? Boolean) ?: false,
+                    icon = ROW_ICONS[(m["icon"] as? String).orEmpty().lowercase()],
                 )
             }?.takeIf { it.isNotEmpty() }
         }
@@ -253,6 +293,8 @@ object DpadCard : CardRenderer {
         label: String,
         wide: Boolean = false,
         width: Int = 0,
+        /** When set, drawn instead of the label -- which stays as the a11y text. */
+        icon: ImageVector? = null,
     ) {
         val (state, click) = rememberPressFeedback { ctx.onHardwareKey(key) }
         Box(
@@ -264,7 +306,11 @@ object DpadCard : CardRenderer {
                 .padding(vertical = 14.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(label, color = FG, fontSize = 15.sp)
+            if (icon != null) {
+                Icon(icon, contentDescription = label, tint = FG, modifier = Modifier.size(22.dp))
+            } else {
+                Text(label, color = FG, fontSize = 15.sp)
+            }
         }
     }
 }

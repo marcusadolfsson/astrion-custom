@@ -297,6 +297,8 @@ class MainActivity : ComponentActivity() {
      *
      * EXTRA_STATUS is the question we actually meant: CHARGING or FULL means the
      * dock can carry it, DISCHARGING means it cannot, whatever the cable says.
+     * NOT_CHARGING counts only while something is plugged in -- see
+     * [readCharging], where a tablet that holds its own charge level lives.
      */
     @Volatile private var charging = false
 
@@ -316,8 +318,31 @@ class MainActivity : ComponentActivity() {
         val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
         val pct = if (level < 0) 100 else level * 100 / scale
         if (pct < BATTERY_FLOOR_PCT) return false
-        return status == BatteryManager.BATTERY_STATUS_CHARGING ||
-            status == BatteryManager.BATTERY_STATUS_FULL
+        return when (status) {
+            BatteryManager.BATTERY_STATUS_CHARGING,
+            BatteryManager.BATTERY_STATUS_FULL,
+            -> true
+            // NOT_CHARGING while a charger is attached is a THIRD case, and
+            // missing it cost the Pixel Tablet both its clock and its backlight.
+            //
+            // The HA100's bedside dock only ever charges or loses ground, so
+            // CHARGING/FULL covered it. A Pixel Tablet on its own dock reports
+            // `Dock powered: true` with status NOT_CHARGING at 90%, because it
+            // deliberately HOLDS the level for battery health rather than
+            // topping up. Read as "the dock cannot carry it", so the screen was
+            // never held on and the idle clock -- which needs the same flag --
+            // never armed. The tablet simply went dark after Android's timeout.
+            //
+            // Plugged-and-not-charging means the charger IS carrying the device;
+            // it is just not adding to it. The case the original fix existed for
+            // reports DISCHARGING, which is still false here, and the per-minute
+            // watchdog plus BATTERY_FLOOR_PCT still catch a dock that starts
+            // losing ground.
+            BatteryManager.BATTERY_STATUS_NOT_CHARGING ->
+                i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+            // DISCHARGING, UNKNOWN.
+            else -> false
+        }
     }
 
     /**
@@ -369,9 +394,18 @@ class MainActivity : ComponentActivity() {
     private fun armScreensaver() {
         keyHandler.removeCallbacks(showScreensaver)
         val cfg = saverCfg()
-        if (cfg.enabled && charging && dockCfg().enabled) {
-            keyHandler.postDelayed(showScreensaver, cfg.idleSeconds * 1000L)
-        }
+        val armed = cfg.enabled && charging && dockCfg().enabled
+        // Say WHICH of the three gates refused. All three are invisible from
+        // outside -- a clock that never appears looks identical whether the
+        // config is off, the dock is not carrying the device, or the idle
+        // window is simply longer than the person watching it.
+        Log.i(
+            KEY_TAG,
+            "screensaver arm=" + armed + " enabled=" + cfg.enabled +
+                " charging=" + charging + " dock=" + dockCfg().enabled +
+                " idle=" + cfg.idleSeconds + "s device=" + deviceName,
+        )
+        if (armed) keyHandler.postDelayed(showScreensaver, cfg.idleSeconds * 1000L)
     }
 
     /**
@@ -419,9 +453,17 @@ class MainActivity : ComponentActivity() {
         // cancel: the menu will close, and the idle time already spent still
         // counts -- otherwise reading a long list would reset the timer.
         if (OpenOverlays.any || settingsOpen || statusOpen) {
+            // Retrying forever is correct but indistinguishable from never
+            // arming, so name the thing holding it back.
+            Log.i(
+                KEY_TAG,
+                "screensaver held: overlay=" + OpenOverlays.any +
+                    " settings=" + settingsOpen + " status=" + statusOpen,
+            )
             keyHandler.postDelayed(showScreensaver, OVERLAY_RETRY_MS)
             return@Runnable
         }
+        Log.i(KEY_TAG, "screensaver fire: enabled=" + saverCfg().enabled + " charging=" + charging)
         if (saverCfg().enabled && charging) {
             screensaverOn = true
             // Re-apply so the backlight comes up to the clock's own level.

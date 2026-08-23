@@ -3,6 +3,7 @@ package com.custom.astrion.cards.impl
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
@@ -46,6 +47,9 @@ import com.custom.astrion.ui.rememberPressFeedback
  * the room back up.
  */
 class SeparatorCard : CardRenderer {
+    /** Drives both the lock button and every separator's minimum height. */
+    private val LOCK_SIZE = 34.dp
+
     override val type = "separator"
 
     @Composable
@@ -53,7 +57,14 @@ class SeparatorCard : CardRenderer {
         val name = config.string("name") ?: ""
         val icon = CardIcons.forName(config.string("icon"))
         Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
+            // Every separator gets the LOCK's height whether or not it has one.
+            // Otherwise a section headed by a lockable separator starts ~12dp
+            // lower than its neighbour, and in a multi-column layout the two
+            // columns' first cards visibly fail to line up.
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp, bottom = 2.dp)
+                .heightIn(min = LOCK_SIZE),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(icon, contentDescription = null, tint = Color(0xFF7FB3C4), modifier = Modifier.size(22.dp))
@@ -80,7 +91,7 @@ class SeparatorCard : CardRenderer {
                 Spacer(Modifier.width(10.dp))
                 Box(
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(LOCK_SIZE)
                         .clip(CircleShape)
                         .background(ackColor(if (locked) Color(0xFFB4472F) else Color(0xFF1E3841), press))
                         .pressFeedback(press, click),

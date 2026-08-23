@@ -79,6 +79,8 @@ class CardContext(
      * including page-scoped overrides. Default is a no-op for previews/tests.
      */
     val onHardwareKey: (HardwareKey) -> Unit = {},
+    /** See UiConfig.mediaArtMaxHeight. 0 means "no cap", i.e. the HA100. */
+    val mediaArtMaxHeight: Int = 0,
 ) {
     val openTarget: String? get() = openTargetState.value
 }

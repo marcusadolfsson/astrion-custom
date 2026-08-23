@@ -301,7 +301,15 @@ class MediaPlayerCard : CardRenderer {
                 }
             }
             // Big album art.
-            val artMod = Modifier.fillMaxWidth().aspectRatio(1.2f).clip(RoundedCornerShape(16.dp))
+            // Uncapped keeps the 1.2 aspect ratio (the remotes). Capped fixes the
+            // height instead and lets ContentScale.Crop take the difference,
+            // which is what keeps the transport keys above the fold in a wide
+            // lane -- an aspect-ratio'd art there is taller than the card.
+            val cap = ctx.mediaArtMaxHeight
+            val artMod = Modifier
+                .fillMaxWidth()
+                .then(if (cap > 0) Modifier.height(cap.dp) else Modifier.aspectRatio(1.2f))
+                .clip(RoundedCornerShape(16.dp))
             if (art != null) {
                 Image(art, null, modifier = artMod, contentScale = ContentScale.Crop)
             } else {

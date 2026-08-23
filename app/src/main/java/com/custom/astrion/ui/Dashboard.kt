@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -173,11 +174,17 @@ fun Dashboard(
     // changing this instance.
     val openTargetState = rememberUpdatedState(openTarget)
     val onKeyState = rememberUpdatedState(onHardwareKey)
-    val ctx = remember(client) {
+    val ctx = remember(client, config.ui) {
         // The lambda is routed through a State so a new callback identity does
         // not change the context's identity -- the whole reason this is
         // remembered (see CardContext's note on skipping).
-        CardContext(entityMap, client, openTargetState) { key -> onKeyState.value(key) }
+        CardContext(
+            entityMap,
+            client,
+            openTargetState,
+            onHardwareKey = { key -> onKeyState.value(key) },
+            mediaArtMaxHeight = config.ui.mediaArtMaxHeight,
+        )
     }
 
     // Give the sole-selector-in-section bubble a moment to see the open request,
@@ -1010,8 +1017,15 @@ private fun PageIndicator(
             //    with Android's swipe-up-to-home, and the system wins.
             // The HA100 has neither, so this measures 0 there and nothing moves.
             .windowInsetsPadding(WindowInsets.systemGestures.only(WindowInsetsSides.Bottom))
+            // A real target, not just the dots. Content height here is ~19dp,
+            // and under a ui.scale below 1 that lands around 30 physical px --
+            // a strip you cannot reliably hit, let alone start a drag in. The
+            // gesture is the only route to the device panel, so it gets a
+            // thumb-sized band whether or not anything is drawn in it.
+            .heightIn(min = 48.dp)
             .padding(top = 4.dp, bottom = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         // No grab-handle affordance: the swipe-up gesture still works anywhere
         // along this bar, it just isn't advertised.

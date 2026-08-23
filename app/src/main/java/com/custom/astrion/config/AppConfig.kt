@@ -123,6 +123,16 @@ data class UiConfig(
      * would re-lock on the very next resume and the PIN would buy nothing.
      */
     val kioskExitMinutes: Int = 5,
+    /**
+     * Cap the full media card's album art at this many dp. 0 = uncapped, which
+     * keeps the art's 1.2 aspect ratio -- the HA100's behaviour, unchanged.
+     *
+     * A wide lane makes the aspect ratio the problem: at ~520dp across, the art
+     * alone is ~430dp tall and pushes the transport keys below the fold. This is
+     * a `ui` setting rather than a card option precisely so the remotes cannot
+     * be affected by a value set for the tablet -- they share the card.
+     */
+    val mediaArtMaxHeight: Int = 0,
 )
 
 data class MotionWakeConfig(

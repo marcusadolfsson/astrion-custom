@@ -276,6 +276,8 @@ object DashboardLoader {
             kioskPinEntity = (o["kiosk_pin_entity"] as? JsonPrimitive)?.content ?: d.kioskPinEntity,
             kioskExitMinutes = ((o["kiosk_exit_minutes"] as? JsonPrimitive)?.content?.toIntOrNull()
                 ?: d.kioskExitMinutes).coerceIn(1, 120),
+            mediaArtMaxHeight = ((o["media_art_max_height"] as? JsonPrimitive)?.content?.toIntOrNull()
+                ?: d.mediaArtMaxHeight).coerceIn(0, 600),
         )
     }
 

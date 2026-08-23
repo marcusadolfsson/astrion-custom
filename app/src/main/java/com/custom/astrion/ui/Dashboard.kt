@@ -136,6 +136,8 @@ fun Dashboard(
     bridgeCommand: String = "",
     /** Fires a logical hardware key; an on-screen `dpad` card routes through it. */
     onHardwareKey: (HardwareKey) -> Unit = {},
+    /** Correct exit PIN entered: MainActivity drops out of lock task. */
+    onKioskExit: () -> Unit = {},
     /** Whether the OEM launcher is currently allowed to run. */
     stockAllowed: Boolean = false,
     onStockAllowedChange: (Boolean) -> Unit = {},
@@ -242,6 +244,22 @@ fun Dashboard(
     val scaled = remember(baseDensity, config.ui.scale) {
         Density(baseDensity.density * config.ui.scale, baseDensity.fontScale)
     }
+    // The exit hatch lives in the swipe-up panel rather than behind a secret
+    // tap count: the panel already IS the maintenance surface (build, sync,
+    // setup server), it is where someone servicing the tablet is already
+    // looking, and it takes a deliberate edge gesture to reach -- which is the
+    // same protection a hidden gesture offered, without being undiscoverable
+    // to whoever inherits this.
+    var showExit by remember { mutableStateOf(false) }
+    if (showExit) {
+        KioskExitDialog(
+            pinEntity = config.ui.kioskPinEntity,
+            ctx = ctx,
+            onUnlock = { showExit = false; onKioskExit() },
+            onDismiss = { showExit = false },
+        )
+    }
+
     CompositionLocalProvider(LocalDensity provides scaled) {
     Box(
         modifier = Modifier
@@ -330,6 +348,8 @@ fun Dashboard(
                 stockStops = stockStops,
                 stockStopAt = stockStopAt,
                 deviceInternals = config.ui.deviceInternals,
+                kiosk = config.ui.kiosk,
+                onKioskExit = { onSettingsOpen(false); showExit = true },
                 onPick = { item ->
                     onSettingsOpen(false)
                     // Launch from the ACTIVITY and WITHOUT FLAG_ACTIVITY_NEW_TASK,
@@ -569,6 +589,10 @@ private fun SettingsSheet(
      * misleading at worst ("Input bridge: not running" is not a fault there).
      */
     deviceInternals: Boolean = true,
+    /** True when the device is locked into this app; adds the Exit row. */
+    kiosk: Boolean = false,
+    /** Opens the PIN pad that leaves kiosk mode. */
+    onKioskExit: () -> Unit = {},
 ) {
     val clipboard = LocalClipboardManager.current
     Box(
@@ -709,6 +733,9 @@ private fun SettingsSheet(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SheetButton("Sync", onSync)
                 SheetButton(if (setupUrl == null) "Setup on" else "Setup off", onSetup)
+                // Only when actually locked -- an Exit button on a device that
+                // is not in kiosk mode would do nothing and read as broken.
+                if (kiosk) SheetButton("Exit kiosk", onKioskExit)
                 SheetButton("Close", onDismiss)
             }
         }

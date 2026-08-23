@@ -107,6 +107,22 @@ data class UiConfig(
      * background, so the page colour still reaches the edge.
      */
     val padding: Int = 0,
+    /**
+     * Lock the device into this app (lock task mode). Requires the app to be
+     * DEVICE OWNER -- without that the call is refused and this is a no-op, so
+     * it is safe to leave set on a device that lost ownership.
+     *
+     * With ownership, LOCK_TASK_FEATURE_NONE also removes the system bars
+     * outright, including the gesture handle that immersive mode cannot hide.
+     */
+    val kiosk: Boolean = false,
+    /** Helper holding the PIN; compared locally. Blank/unset falls back to 0000. */
+    val kioskPinEntity: String = "input_text.tv_wall_lock_pin",
+    /**
+     * How long the kiosk stays off after a correct PIN. Without this the app
+     * would re-lock on the very next resume and the PIN would buy nothing.
+     */
+    val kioskExitMinutes: Int = 5,
 )
 
 data class MotionWakeConfig(

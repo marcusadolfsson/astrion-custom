@@ -272,6 +272,10 @@ object DashboardLoader {
                 .coerceIn(0.5f, 2f),
             padding = ((o["padding"] as? JsonPrimitive)?.content?.toIntOrNull() ?: d.padding)
                 .coerceIn(0, 64),
+            kiosk = (o["kiosk"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: d.kiosk,
+            kioskPinEntity = (o["kiosk_pin_entity"] as? JsonPrimitive)?.content ?: d.kioskPinEntity,
+            kioskExitMinutes = ((o["kiosk_exit_minutes"] as? JsonPrimitive)?.content?.toIntOrNull()
+                ?: d.kioskExitMinutes).coerceIn(1, 120),
         )
     }
 

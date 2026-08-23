@@ -902,7 +902,74 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) applyImmersive()
+        if (hasFocus) {
+            applyImmersive()
+            // Re-arm here rather than only in onResume: an already-resumed
+            // activity gets no second onResume, and regaining focus is the
+            // moment something else just gave the foreground back.
+            applyKiosk()
+        }
+    }
+
+    // ---- kiosk (lock task) --------------------------------------------------
+
+    /** Set by a correct exit PIN; until then the kiosk re-arms on every resume. */
+    private var kioskSuspendedUntil = 0L
+
+    private val dpm by lazy {
+        getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
+    }
+    private val adminComponent by lazy {
+        android.content.ComponentName(this, SleepAdminReceiver::class.java)
+    }
+
+    /**
+     * Enter lock task if the layout asks for it and we are allowed to.
+     *
+     * Device owner is what makes this worth doing: LOCK_TASK_FEATURE_NONE
+     * removes the system bars entirely, including the gesture handle that
+     * immersive mode CANNOT hide (hiding the bars zeroes their insets but the
+     * handle still draws). Without ownership setLockTaskPackages throws and we
+     * leave the app unpinned rather than falling into Android's screen-pinning
+     * flow, which prompts the user and is escapable with Back+Overview -- that
+     * would look like a lock while being none.
+     */
+    private fun applyKiosk() {
+        if (!dashboard.config.ui.kiosk) {
+            if (isKiosk()) runCatching { stopLockTask() }
+            return
+        }
+        if (System.currentTimeMillis() < kioskSuspendedUntil) return
+        if (!dpm.isDeviceOwnerApp(packageName)) {
+            Log.w(KEY_TAG, "ui.kiosk set but this app is not device owner -- not locking")
+            return
+        }
+        runCatching {
+            dpm.setLockTaskPackages(adminComponent, arrayOf(packageName))
+            dpm.setLockTaskFeatures(
+                adminComponent,
+                android.app.admin.DevicePolicyManager.LOCK_TASK_FEATURE_NONE,
+            )
+        }.onFailure { Log.w(KEY_TAG, "lock task policy failed: ${it.message}") }
+        if (!isKiosk()) runCatching { startLockTask() }
+            .onFailure { Log.w(KEY_TAG, "startLockTask failed: ${it.message}") }
+    }
+
+    private fun isKiosk(): Boolean {
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        return am.lockTaskModeState != android.app.ActivityManager.LOCK_TASK_MODE_NONE
+    }
+
+    /** Correct PIN: drop out of lock task and stay out for the configured window. */
+    private fun exitKiosk() {
+        kioskSuspendedUntil =
+            System.currentTimeMillis() + dashboard.config.ui.kioskExitMinutes * 60_000L
+        runCatching { stopLockTask() }
+        Toast.makeText(
+            this,
+            "Kiosk off for ${dashboard.config.ui.kioskExitMinutes} min",
+            Toast.LENGTH_LONG,
+        ).show()
     }
 
     /**
@@ -1084,6 +1151,7 @@ class MainActivity : ComponentActivity() {
                     // takes -- page bindings first, then global -- so a drawn
                     // pad and a moulded one cannot drift apart.
                     onHardwareKey = { key -> shortFor(key)?.let { runHotkey(it) } },
+                    onKioskExit = { exitKiosk() },
                     bridgeCommand = bridgeCommand(),
                     stockAllowed = stockAllowed,
                     onStockAllowedChange = { allow ->
@@ -1183,6 +1251,7 @@ class MainActivity : ComponentActivity() {
     private fun applyDashboard(result: DashboardLoader.Result) {
         dashboard = result
         applyOrientation()
+        applyKiosk()
         rebuildBindings()
         client.setSubscribedEntities(EntityRefs.collect(result.config))
     }

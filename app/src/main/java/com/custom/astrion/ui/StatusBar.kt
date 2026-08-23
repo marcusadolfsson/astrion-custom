@@ -45,7 +45,10 @@ import java.util.Locale
  * when looked at, invisible when not.
  */
 @Composable
-fun StatusBar(is24Hour: Boolean = false, onSwipeDown: (() -> Unit)? = null) {
+fun StatusBar(
+    is24Hour: Boolean = false,
+    onSwipeDown: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
 
     // Tick every 10s rather than every second: the display only shows minutes,

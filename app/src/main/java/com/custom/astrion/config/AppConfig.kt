@@ -40,6 +40,8 @@ data class AppConfig(
      * behaviour for a device with no helper of its own.
      */
     val pageEntity: String? = null,
+    /** Presentation for THIS device; see [UiConfig]. Defaults are the HA100's. */
+    val ui: UiConfig = UiConfig(),
     /** Motion-wake tuning; see [MotionWakeConfig]. Absent means built-in defaults. */
     val motionWake: MotionWakeConfig = MotionWakeConfig(),
     /** What the display does while the remote is on charge. */
@@ -64,6 +66,49 @@ data class AppConfig(
  * one spike and over. Requiring several consecutive samples above [threshold]
  * discriminates on duration rather than force.
  */
+/**
+ * How the layout is PRESENTED on this device, as opposed to what it contains.
+ *
+ * Every default here reproduces the HA100 exactly, so a layout file that says
+ * nothing about `ui` behaves as it always has. These are set in a per-device
+ * override file -- the Pixel Tablet is a 1280x800dp landscape screen with no
+ * hardware buttons, which is a different presentation of the same dashboard,
+ * not a different dashboard.
+ */
+data class UiConfig(
+    /**
+     * `portrait` | `landscape` | `auto`. Applied with setRequestedOrientation,
+     * which overrides the manifest at runtime -- so the manifest stays pinned to
+     * portrait and a handheld remote cannot rotate even if its layout is broken.
+     */
+    val orientation: String = "portrait",
+    /**
+     * Cards per row. Above 1 the page switches to a staggered grid and
+     * `separator` cards take a full-width line of their own, so sections still
+     * read as sections instead of being shuffled into a column.
+     */
+    val columns: Int = 1,
+    /**
+     * Show the "Screen-off keys" and "Stock app" sections in the swipe-up panel.
+     * Both are HA100 internals -- the evdev input bridge and the OEM launcher's
+     * wake lock -- and neither exists on a tablet.
+     */
+    val deviceInternals: Boolean = true,
+    /**
+     * Uniform UI scale, applied by overriding LocalDensity for the whole
+     * dashboard, so every dp AND sp shrinks together and no card needs its own
+     * tablet sizes. 1.0 is the HA100's design size; a 10" panel wants ~0.8,
+     * where the same card carries the same proportions in less glass.
+     */
+    val scale: Float = 1f,
+    /**
+     * Margin in dp around the whole dashboard. The HA100 uses every pixel it
+     * has; a wall tablet looks better inset from the bezel. Applied inside the
+     * background, so the page colour still reaches the edge.
+     */
+    val padding: Int = 0,
+)
+
 data class MotionWakeConfig(
     /** Off entirely. The `no-motion-wake` file flag also forces this off. */
     val enabled: Boolean = true,

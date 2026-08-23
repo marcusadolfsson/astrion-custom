@@ -14,7 +14,20 @@ import android.provider.Settings
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -66,6 +79,7 @@ import androidx.compose.runtime.snapshotFlow
 import com.custom.astrion.ha.EntityMap
 import com.custom.astrion.ha.EntityState
 import com.custom.astrion.ha.HaClient
+import com.custom.astrion.input.HardwareKey
 import kotlinx.coroutines.launch
 
 /**
@@ -120,6 +134,8 @@ fun Dashboard(
     bridgeConnected: Boolean = false,
     /** The exact adb command that starts the bridge, apk path resolved. */
     bridgeCommand: String = "",
+    /** Fires a logical hardware key; an on-screen `dpad` card routes through it. */
+    onHardwareKey: (HardwareKey) -> Unit = {},
     /** Whether the OEM launcher is currently allowed to run. */
     stockAllowed: Boolean = false,
     onStockAllowedChange: (Boolean) -> Unit = {},
@@ -154,7 +170,13 @@ fun Dashboard(
     // card from skipping. openTarget rides in a State so it can change without
     // changing this instance.
     val openTargetState = rememberUpdatedState(openTarget)
-    val ctx = remember(client) { CardContext(entityMap, client, openTargetState) }
+    val onKeyState = rememberUpdatedState(onHardwareKey)
+    val ctx = remember(client) {
+        // The lambda is routed through a State so a new callback identity does
+        // not change the context's identity -- the whole reason this is
+        // remembered (see CardContext's note on skipping).
+        CardContext(entityMap, client, openTargetState) { key -> onKeyState.value(key) }
+    }
 
     // Give the sole-selector-in-section bubble a moment to see the open request,
     // then clear it so the next keypress re-triggers.
@@ -212,12 +234,21 @@ fun Dashboard(
         return
     }
 
+    // Shrink the WHOLE dashboard by overriding the density rather than by
+    // giving cards tablet-specific sizes. Density drives both dp and sp, so one
+    // number keeps every proportion the design already has -- padding, corner
+    // radii, icon sizes, type -- and no card has to know what it is running on.
+    val baseDensity = LocalDensity.current
+    val scaled = remember(baseDensity, config.ui.scale) {
+        Density(baseDensity.density * config.ui.scale, baseDensity.fontScale)
+    }
+    CompositionLocalProvider(LocalDensity provides scaled) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0E2229)),
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().padding(config.ui.padding.dp)) {
             // Above the banners on purpose: the clock and battery should hold
             // the same spot whether or not a connection banner is showing.
             StatusBar(onSwipeDown = config.gestures?.swipeDown?.let { { onSettingsOpen(true) } })
@@ -237,6 +268,7 @@ fun Dashboard(
                     ctx,
                     if (pageIndex == pagerState.currentPage) scrollTarget else null,
                     onScrollHandled,
+                    columns = config.ui.columns,
                 )
             }
 
@@ -297,6 +329,7 @@ fun Dashboard(
                 onStockAllowedChange = onStockAllowedChange,
                 stockStops = stockStops,
                 stockStopAt = stockStopAt,
+                deviceInternals = config.ui.deviceInternals,
                 onPick = { item ->
                     onSettingsOpen(false)
                     // Launch from the ACTIVITY and WITHOUT FLAG_ACTIVITY_NEW_TASK,
@@ -328,6 +361,7 @@ fun Dashboard(
                 onDismiss = { onStatusOpen(false) },
             )
         }
+    }
     }
 }
 
@@ -528,6 +562,13 @@ private fun SettingsSheet(
     onStockAllowedChange: (Boolean) -> Unit,
     stockStops: Int,
     stockStopAt: Long,
+    /**
+     * Show the HA100-internal sections (input bridge / OEM launcher). False on
+     * a device that has neither -- a tablet has no evdev key bridge to start and
+     * no stock launcher to force-stop, so those rows are noise at best and
+     * misleading at worst ("Input bridge: not running" is not a fault there).
+     */
+    deviceInternals: Boolean = true,
 ) {
     val clipboard = LocalClipboardManager.current
     Box(
@@ -580,78 +621,80 @@ private fun SettingsSheet(
                 )
             }
 
-            Spacer(Modifier.height(4.dp))
-            Text("Screen-off keys", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
-            InfoRow("Input bridge", if (bridgeConnected) "connected" else "not running")
-            // Next to the bridge because they fail together: a reboot drops
-            // network adb AND kills the bridge, and this row is how you find out
-            // without discovering it mid-deploy.
-            InfoRow("ADB over TCP", adbStatus.ifBlank { "—" })
-            if (!bridgeConnected) {
-                // Shown only when it is missing, and it explains itself: the app
-                // cannot start this. /dev/input needs group 1004 and the
-                // input_device SELinux label, which no app has and none can be
-                // granted -- so it takes a shell, every boot.
+            if (deviceInternals) {
+                Spacer(Modifier.height(4.dp))
+                Text("Screen-off keys", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                InfoRow("Input bridge", if (bridgeConnected) "connected" else "not running")
+                // Next to the bridge because they fail together: a reboot drops
+                // network adb AND kills the bridge, and this row is how you find out
+                // without discovering it mid-deploy.
+                InfoRow("ADB over TCP", adbStatus.ifBlank { "—" })
+                if (!bridgeConnected) {
+                    // Shown only when it is missing, and it explains itself: the app
+                    // cannot start this. /dev/input needs group 1004 and the
+                    // input_device SELinux label, which no app has and none can be
+                    // granted -- so it takes a shell, every boot.
+                    Text(
+                        "Keys work normally without this. Start it over adb to make the " +
+                            "press that wakes the screen also do its job:",
+                        color = Color(0xFF93AFB6),
+                        fontSize = 13.sp,
+                    )
+                    Text(
+                        bridgeCommand,
+                        color = Color(0xFFD7E3EA),
+                        fontSize = 11.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF0E2229))
+                            .clickable { clipboard.setText(AnnotatedString(bridgeCommand)) }
+                            .padding(10.dp),
+                    )
+                    Text("tap to copy", color = Color(0xFF6E8A93), fontSize = 11.sp)
+                }
+
+                Spacer(Modifier.height(4.dp))
+                Text("Stock app", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                ToggleRow(
+                    // A FIXED label. It read "Allowed to run" / "Kept stopped",
+                    // which changed with the switch and left it ambiguous whether
+                    // the words described the current state or what tapping would do.
+                    label = "Allow stock app to run",
+                    checked = stockAllowed,
+                    enabled = bridgeConnected,
+                    onChange = onStockAllowedChange,
+                )
+                InfoRow(
+                    "Force-stopped",
+                    if (stockStops == 0) "never" else buildString {
+                        append(stockStops)
+                        append(if (stockStops == 1) " time" else " times")
+                        if (stockStopAt > 0) {
+                            append(", last ")
+                            append(
+                                android.text.format.DateUtils.getRelativeTimeSpanString(
+                                    stockStopAt,
+                                    System.currentTimeMillis(),
+                                    android.text.format.DateUtils.MINUTE_IN_MILLIS,
+                                )
+                            )
+                        }
+                    },
+                )
                 Text(
-                    "Keys work normally without this. Start it over adb to make the " +
-                        "press that wakes the screen also do its job:",
+                    if (bridgeConnected) {
+                        "The OEM launcher holds a wake lock the whole time it runs, so the " +
+                            "bridge force-stops it every minute. Allow it if you need it back " +
+                            "-- it stays installed either way and is never disabled."
+                    } else {
+                        "Needs the input bridge: force-stopping a package is a shell " +
+                            "privilege, so the app cannot do it on its own."
+                    },
                     color = Color(0xFF93AFB6),
                     fontSize = 13.sp,
                 )
-                Text(
-                    bridgeCommand,
-                    color = Color(0xFFD7E3EA),
-                    fontSize = 11.sp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF0E2229))
-                        .clickable { clipboard.setText(AnnotatedString(bridgeCommand)) }
-                        .padding(10.dp),
-                )
-                Text("tap to copy", color = Color(0xFF6E8A93), fontSize = 11.sp)
             }
-
-            Spacer(Modifier.height(4.dp))
-            Text("Stock app", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
-            ToggleRow(
-                // A FIXED label. It read "Allowed to run" / "Kept stopped",
-                // which changed with the switch and left it ambiguous whether
-                // the words described the current state or what tapping would do.
-                label = "Allow stock app to run",
-                checked = stockAllowed,
-                enabled = bridgeConnected,
-                onChange = onStockAllowedChange,
-            )
-            InfoRow(
-                "Force-stopped",
-                if (stockStops == 0) "never" else buildString {
-                    append(stockStops)
-                    append(if (stockStops == 1) " time" else " times")
-                    if (stockStopAt > 0) {
-                        append(", last ")
-                        append(
-                            android.text.format.DateUtils.getRelativeTimeSpanString(
-                                stockStopAt,
-                                System.currentTimeMillis(),
-                                android.text.format.DateUtils.MINUTE_IN_MILLIS,
-                            )
-                        )
-                    }
-                },
-            )
-            Text(
-                if (bridgeConnected) {
-                    "The OEM launcher holds a wake lock the whole time it runs, so the " +
-                        "bridge force-stops it every minute. Allow it if you need it back " +
-                        "-- it stays installed either way and is never disabled."
-                } else {
-                    "Needs the input bridge: force-stopping a package is a shell " +
-                        "privilege, so the app cannot do it on its own."
-                },
-                color = Color(0xFF93AFB6),
-                fontSize = 13.sp,
-            )
 
             Spacer(Modifier.height(4.dp))
             Text("Astrion Custom", color = Color(0xFFF1F4FA), fontSize = 17.sp, fontWeight = FontWeight.Bold)
@@ -726,48 +769,112 @@ private fun PageContent(
     ctx: CardContext,
     scrollTarget: String? = null,
     onScrollHandled: () -> Unit = {},
+    columns: Int = 1,
 ) {
     // Cards with options["pin"] == "bottom" float at the bottom, always visible;
     // the rest scroll above them.
     val pinned = remember(page) { page.cards.filter { it.options["pin"] == "bottom" } }
     val scrolling = remember(page) { page.cards.filter { it.options["pin"] != "bottom" } }
 
+    // Only lay out cards that will actually draw something. A hidden
+    // `conditional` still occupies a slot, and the spacing puts a gap around
+    // every slot -- so the three conditionals stacked above the first separator
+    // on Main left ~30dp of hole between the status bar and "Watch" whenever
+    // nothing was playing. Filtering here (not inside the card) is what removes
+    // the gap as well as the content.
+    val visible = scrolling.filter {
+        it.type != "conditional" || ConditionalCard.matches(it, ctx)
+    }
+    fun separatorIndex(name: String) = visible.indexOfFirst {
+        it.type == "separator" &&
+            (it.options["name"] as? String)?.equals(name, ignoreCase = true) == true
+    }
+
     val listState = rememberLazyListState()
+    val gridState = rememberLazyStaggeredGridState()
+    val multi = columns > 1
+
     // Hardware "scroll to section": scroll so the matching separator sits at the
     // top. Only the page that actually has the section consumes the request.
-    LaunchedEffect(scrollTarget) {
+    LaunchedEffect(scrollTarget, multi) {
         val name = scrollTarget ?: return@LaunchedEffect
-        val idx = scrolling.indexOfFirst {
-            it.type == "separator" &&
-                (it.options["name"] as? String)?.equals(name, ignoreCase = true) == true
-        }
+        val idx = separatorIndex(name)
         if (idx >= 0) {
-            listState.animateScrollToItem(idx)
+            if (multi) gridState.animateScrollToItem(idx) else listState.animateScrollToItem(idx)
             onScrollHandled()
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            // Index keys: the card list only changes when the layout syncs, and
-            // they keep LazyColumn reusing slots instead of re-composing on the
-            // list's identity.
-            // Only lay out cards that will actually draw something. A hidden
-            // `conditional` still occupies a slot, and spacedBy(10.dp) puts a
-            // gap around every slot -- so the three conditionals stacked above
-            // the first separator on Main left ~30dp of hole between the status
-            // bar and "Watch" whenever nothing was playing. Filtering here (not
-            // inside the card) is what removes the gap as well as the content.
-            val visible = scrolling.filter {
-                it.type != "conditional" || ConditionalCard.matches(it, ctx)
+        if (multi) {
+            // A card may claim a lane with `column: N` (1-based); everything else
+            // FLOWS through the lanes nobody claimed. That is what makes a
+            // sidebar expressible -- "media player and dpad on the right" -- while
+            // the rest of the page still reflows as a grid. On a single-column
+            // device the option is simply never read, so the same base layout
+            // carries it harmlessly.
+            // A separator's `column:` claims the SECTION it opens, not just its
+            // own line -- "put Watch in lane 1" should not mean tagging every
+            // card underneath it, and a section that later grows a card would
+            // otherwise silently land in the wrong lane. An individual card
+            // still overrides, and a separator with no lane opens an
+            // unassigned section.
+            var section: Int? = null
+            val tagged = visible.map { card ->
+                val own = card.lane()?.takeIf { it in 1..columns }
+                // Only a TAGGED separator switches lanes. An untagged one
+                // continues the current section, so "Lights in lane 2" carries
+                // Shades and Climate with it and each new section does not have
+                // to repeat the lane it is already in.
+                if (card.type == "separator" && own != null) section = own
+                card to (own ?: section)
             }
-            items(visible.size, key = { it }) { i ->
-                RenderCard(visible[i], ctx)
+            val claimed = tagged.mapNotNull { it.second }.toSet()
+            // When every lane is spoken for there is no flow area, so anything
+            // unassigned joins the first claimed lane instead of vanishing.
+            val fallback = if ((1..columns).any { it !in claimed }) null else claimed.minOrNull()
+            val resolved = tagged.map { (c, l) -> c to (l ?: fallback) }
+            val flowCards = resolved.filter { it.second == null }.map { it.first }
+            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                var lane = 1
+                var flowDrawn = false
+                while (lane <= columns) {
+                    if (lane in claimed) {
+                        LaneColumn(
+                            resolved.filter { it.second == lane }.map { it.first },
+                            ctx,
+                            Modifier.weight(1f),
+                        )
+                        lane++
+                    } else {
+                        // Consecutive unclaimed lanes merge into ONE grid, so a
+                        // separator spanning "the full line" spans the flow area
+                        // rather than the whole screen -- otherwise a section rule
+                        // would run underneath the sidebar too.
+                        var span = 0
+                        while (lane <= columns && lane !in claimed) { span++; lane++ }
+                        if (!flowDrawn) {
+                            flowDrawn = true
+                            FlowGrid(flowCards, ctx, gridState, span, Modifier.weight(span.toFloat()))
+                        } else {
+                            Spacer(Modifier.weight(span.toFloat()))
+                        }
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Index keys: the card list only changes when the layout syncs,
+                // and they keep LazyColumn reusing slots instead of re-composing
+                // on the list's identity.
+                items(visible.size, key = { it }) { i ->
+                    RenderCard(visible[i], ctx)
+                }
             }
         }
         if (pinned.isNotEmpty()) {
@@ -781,6 +888,59 @@ private fun PageContent(
                 pinned.forEach { RenderCard(it, ctx) }
             }
         }
+    }
+}
+
+/** `column: N` on a card, 1-based; null when unset or not a number. */
+private fun CardConfig.lane(): Int? = (options["column"] as? Number)?.toInt()
+
+/** The reflowing part of a multi-column page. */
+@Composable
+private fun FlowGrid(
+    cards: List<CardConfig>,
+    ctx: CardContext,
+    state: androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState,
+    columns: Int,
+    modifier: Modifier = Modifier,
+) {
+    // Staggered rather than a fixed grid: cards differ a lot in height (a
+    // climate card against a separator), and a fixed grid would pad every row up
+    // to its tallest member. Separators take a full line so a section still
+    // reads as a section instead of being dealt into whichever column had space.
+    LazyVerticalStaggeredGrid(
+        columns = StaggeredGridCells.Fixed(columns),
+        state = state,
+        modifier = modifier.fillMaxHeight(),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+        verticalItemSpacing = 10.dp,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items(
+            cards.size,
+            key = { it },
+            span = {
+                if (cards[it].type == "separator") StaggeredGridItemSpan.FullLine
+                else StaggeredGridItemSpan.SingleLane
+            },
+        ) { i -> RenderCard(cards[i], ctx) }
+    }
+}
+
+/**
+ * One explicitly-claimed lane. Scrolls on its own: a sidebar holding a media
+ * card and a D-pad is a different length from the page beside it, and tying them
+ * to one scrollbar would mean scrolling the dashboard to reach the transport.
+ */
+@Composable
+private fun LaneColumn(cards: List<CardConfig>, ctx: CardContext, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        cards.forEach { RenderCard(it, ctx) }
     }
 }
 
@@ -813,6 +973,16 @@ private fun PageIndicator(
                     }
                 }
             }
+            // Keep clear of the system's gesture strip. Two reasons, and the
+            // second is the important one:
+            //  - the gesture handle DRAWS over this bar on a device that has one
+            //    (the Pixel Tablet keeps it even in immersive mode, where hiding
+            //    the bars sets the navigationBars inset to 0 but not this one),
+            //    which put a white pill through the page name; and
+            //  - our own swipe-up-to-open-panel would otherwise share pixels
+            //    with Android's swipe-up-to-home, and the system wins.
+            // The HA100 has neither, so this measures 0 there and nothing moves.
+            .windowInsetsPadding(WindowInsets.systemGestures.only(WindowInsetsSides.Bottom))
             .padding(top = 4.dp, bottom = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

@@ -6,6 +6,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import com.custom.astrion.ha.EntityMap
 import com.custom.astrion.ha.HaClient
+import com.custom.astrion.input.HardwareKey
 
 /**
  * THE EXTENSIBILITY CORE.
@@ -70,6 +71,14 @@ class CardContext(
      *  State so changing it doesn't change this context's identity — only the
      *  cards that actually read it recompose. */
     private val openTargetState: State<String?> = mutableStateOf(null),
+    /**
+     * Fire a logical hardware key, exactly as if the physical button had been
+     * pressed. Lets an on-screen control (see DpadCard) reuse the layout's own
+     * `hotkeys:` table rather than restating every service call -- so a tablet's
+     * drawn D-pad and a remote's real one stay identical by construction,
+     * including page-scoped overrides. Default is a no-op for previews/tests.
+     */
+    val onHardwareKey: (HardwareKey) -> Unit = {},
 ) {
     val openTarget: String? get() = openTargetState.value
 }

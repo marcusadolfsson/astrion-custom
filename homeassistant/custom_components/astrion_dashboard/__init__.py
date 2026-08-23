@@ -20,10 +20,38 @@ already sends its bearer token.
 Because it uses HA's own YAML loader, `!include` works, so the layout can be
 split into per-page files later if it grows.
 
+Per-remote layouts are chosen by SOURCE IP. There are three HA100s and they are
+not identical: the HA100B units print SCAN / PLAY-PAUSE / STOP / SCAN FWD where
+the HA100A prints LIGHT / SHADE / MUSIC / AC, on buttons that emit the SAME
+keycodes (134-137). So the same `key:` name has to mean different things per
+remote, and the layout is the only place that can express it.
+
+IP was chosen over the alternatives because it needs NO app change: the app
+sends no device identity, and `request.remote` is already on every request.
+It is trustworthy here because the remotes connect straight to :8123 --
+`use_x_forwarded_for` only honours XFF from `trusted_proxies` (127.0.0.1/::1),
+so nothing rewrites it for a direct LAN client.
+
+An unlisted IP falls back to the default layout, so a remote whose address moves
+degrades to the A-unit layout rather than 404ing. **This means static DHCP leases
+matter**: a silent fallback looks like "my hotkeys stopped working", so the
+resolved path is logged on every miss.
+
+A device file is an OVERRIDE, not a whole layout: it is shallow-merged over the
+base, top-level key by top-level key, and whatever it does not mention is
+inherited. So the B units' file is ~30 lines of `hotkeys:` rather than a 443-line
+copy of the layout that would silently drift out of step with the original the
+first time a page changed. Merging is per top-level key and does NOT descend --
+`hotkeys:` in an override replaces the base list outright rather than appending
+to it, because a partial hotkey list would be ambiguous about removals.
+
 Config (configuration.yaml):
 
     astrion_dashboard:
       path: astrion/dashboard.yaml   # optional, this is the default
+      devices:                       # optional, per-remote overrides by source IP
+        10.10.10.208: astrion/dashboard.b.yaml
+        10.10.10.14: astrion/dashboard.b.yaml
 """
 from __future__ import annotations
 
@@ -45,7 +73,14 @@ DOMAIN = "astrion_dashboard"
 DEFAULT_PATH = "astrion/dashboard.yaml"
 
 CONFIG_SCHEMA = vol.Schema(
-    {DOMAIN: vol.Schema({vol.Optional("path", default=DEFAULT_PATH): cv.string})},
+    {
+        DOMAIN: vol.Schema(
+            {
+                vol.Optional("path", default=DEFAULT_PATH): cv.string,
+                vol.Optional("devices", default={}): {cv.string: cv.string},
+            }
+        )
+    },
     extra=vol.ALLOW_EXTRA,
 )
 
@@ -55,8 +90,16 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     conf = config.get(DOMAIN) or {}
     rel_path = conf.get("path", DEFAULT_PATH)
     path = hass.config.path(rel_path)
-    hass.http.register_view(AstrionDashboardView(path))
-    _LOGGER.info("astrion_dashboard: serving %s at /api/%s", path, DOMAIN)
+    devices = {
+        ip: hass.config.path(p) for ip, p in (conf.get("devices") or {}).items()
+    }
+    hass.http.register_view(AstrionDashboardView(path, devices))
+    _LOGGER.info(
+        "astrion_dashboard: serving %s at /api/%s (%d per-device override(s))",
+        path,
+        DOMAIN,
+        len(devices),
+    )
     return True
 
 
@@ -69,22 +112,105 @@ class AstrionDashboardView(HomeAssistantView):
     # websocket, so the layout isn't world-readable the way /local/ is.
     requires_auth = True
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, devices: dict[str, str] | None = None) -> None:
         self._path = path
+        self._devices = devices or {}
+
+    def _resolve(self, request: web.Request) -> str | None:
+        """Pick the override file for this client, by source IP, or None.
+
+        An unlisted address gets the base layout -- a remote that changed IP
+        should show the A-unit layout, not an error page. Logged at DEBUG so
+        "why did my hotkeys revert" is answerable without adding code.
+        """
+        ip = request.remote
+        path = self._devices.get(ip)
+        if path is None:
+            if self._devices:
+                _LOGGER.debug(
+                    "astrion_dashboard: %s not in devices, serving base %s",
+                    ip,
+                    self._path,
+                )
+            return None
+        _LOGGER.debug("astrion_dashboard: %s -> %s over %s", ip, path, self._path)
+        return path
 
     async def get(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
+        override = self._resolve(request)
         try:
-            data = await hass.async_add_executor_job(self._load)
-        except FileNotFoundError:
-            return self.json_message(
-                f"{os.path.basename(self._path)} not found", status_code=404
+            data = await hass.async_add_executor_job(self._load, override)
+        except FileNotFoundError as err:
+            # A per-device override pointing at a missing file is a config typo,
+            # not a client problem -- say which file, and for whom.
+            _LOGGER.error(
+                "astrion_dashboard: %s not found (requested by %s)", err, request.remote
             )
+            return self.json_message(f"{err} not found", status_code=404)
         except Exception as err:  # noqa: BLE001 - surface parse errors to the client
-            _LOGGER.error("astrion_dashboard: failed to load %s: %s", self._path, err)
+            _LOGGER.error("astrion_dashboard: failed to load for %s: %s", request.remote, err)
             return self.json_message(f"invalid YAML: {err}", status_code=500)
         return self.json(data)
 
-    def _load(self):
-        """Read + parse the YAML (blocking; runs in the executor)."""
-        return load_yaml(self._path)
+    def _load(self, override: str | None):
+        """Read + parse the YAML, applying a per-device override (blocking)."""
+        try:
+            data = load_yaml(self._path)
+        except FileNotFoundError:
+            raise FileNotFoundError(os.path.basename(self._path)) from None
+        if not override:
+            return data
+        try:
+            patch = load_yaml(override)
+        except FileNotFoundError:
+            raise FileNotFoundError(os.path.basename(override)) from None
+        if not isinstance(data, dict) or not isinstance(patch, dict):
+            # Both are mappings in practice; if not, the override is meaningless
+            # and silently returning the base would hide a broken file.
+            raise ValueError(
+                f"{os.path.basename(override)} and the base layout must both be mappings"
+            )
+        merged = {**data, **patch}
+        return self._apply_page_cards(merged, os.path.basename(override))
+
+    @staticmethod
+    def _apply_page_cards(merged: dict, who: str) -> dict:
+        """Insert per-device cards into named pages.
+
+        The top-level merge is deliberately shallow, which makes `pages:`
+        all-or-nothing: a device wanting ONE extra card had to restate the whole
+        700-line page list, and every later edit to the base would have to be
+        made twice. This adds the narrow case that actually comes up -- add a
+        card to a page that otherwise stays shared:
+
+            page_cards:
+              Living Room:
+                prepend:
+                  - {type: conditional, ...}
+                append:
+                  - {type: dpad, ...}
+
+        Matching is by page NAME, not index, so it survives page reordering
+        (unlike startPage, which is positional by nature). An unknown name is an
+        error rather than a no-op -- a typo that silently does nothing is the
+        failure mode this whole file exists to avoid.
+        """
+        spec_all = merged.pop("page_cards", None)
+        if not spec_all:
+            return merged
+        if not isinstance(spec_all, dict):
+            raise ValueError(f"{who}: page_cards must be a mapping of page name -> cards")
+        pages = [dict(p) for p in (merged.get("pages") or [])]
+        by_name = {str(p.get("name", "")).casefold(): p for p in pages}
+        for name, spec in spec_all.items():
+            page = by_name.get(str(name).casefold())
+            if page is None:
+                raise ValueError(
+                    f"{who}: page_cards names {name!r}, which is not a page in the base layout"
+                )
+            before = list((spec or {}).get("prepend") or [])
+            after = list((spec or {}).get("append") or [])
+            page["cards"] = before + list(page.get("cards") or []) + after
+        merged["pages"] = pages
+        return merged

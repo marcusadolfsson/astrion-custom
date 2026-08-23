@@ -10,6 +10,7 @@ import com.custom.astrion.cards.impl.ClimateCard
 import com.custom.astrion.cards.impl.ClockWeatherCard
 import com.custom.astrion.cards.impl.ConditionalCard
 import com.custom.astrion.cards.impl.CoverCard
+import com.custom.astrion.cards.impl.DpadCard
 import com.custom.astrion.cards.impl.FanCard
 import com.custom.astrion.cards.impl.LightCard
 import com.custom.astrion.cards.impl.MediaPlayerCard
@@ -62,6 +63,7 @@ class AstrionApp : Application() {
             SourceModalCard(),
             VacuumCard(),
             ConditionalCard(),
+            DpadCard,
             BubbleSelectCard(),
             BubbleClimateCard(),
             SeparatorCard(),

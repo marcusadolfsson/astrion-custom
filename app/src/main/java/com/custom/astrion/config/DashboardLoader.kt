@@ -216,6 +216,7 @@ object DashboardLoader {
                 AppConfig(
                     pages, start.coerceIn(0, pages.size - 1), hotkeys, longHotkeys,
                     overlay, voice, gestures, status, pageEntity,
+                    parseUi(root["ui"] as? JsonObject),
                     parseMotionWake(root["motion_wake"] as? JsonObject),
                     parseDockDisplay(root["dock_display"] as? JsonObject),
                     parseScreensaver(root["screensaver"] as? JsonObject),
@@ -257,6 +258,23 @@ object DashboardLoader {
      * same reader, so it takes the same keys; nested `devices` inside one is
      * ignored by [MotionWakeConfig.forDevice].
      */
+    private fun parseUi(o: JsonObject?): UiConfig {
+        val d = UiConfig()
+        if (o == null) return d
+        return UiConfig(
+            orientation = (o["orientation"] as? JsonPrimitive)?.content ?: d.orientation,
+            columns = (o["columns"] as? JsonPrimitive)?.content?.toIntOrNull() ?: d.columns,
+            deviceInternals = (o["device_internals"] as? JsonPrimitive)?.content
+                ?.toBooleanStrictOrNull() ?: d.deviceInternals,
+            // Clamped: a stray 0 or a negative would divide the layout out of
+            // existence, and a config typo should not need adb to undo.
+            scale = ((o["scale"] as? JsonPrimitive)?.content?.toFloatOrNull() ?: d.scale)
+                .coerceIn(0.5f, 2f),
+            padding = ((o["padding"] as? JsonPrimitive)?.content?.toIntOrNull() ?: d.padding)
+                .coerceIn(0, 64),
+        )
+    }
+
     private fun parseMotionWake(o: JsonObject?): MotionWakeConfig {
         val d = MotionWakeConfig()
         if (o == null) return d

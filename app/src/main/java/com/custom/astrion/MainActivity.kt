@@ -39,7 +39,11 @@ import com.custom.astrion.config.DashboardConfig
 import com.custom.astrion.config.DashboardLoader
 import android.content.IntentFilter
 import com.custom.astrion.config.EntityRefs
+import android.content.pm.ActivityInfo
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.custom.astrion.config.HotkeyConfig
 import com.custom.astrion.config.JsonPlain
 import com.custom.astrion.config.PageConfig
@@ -874,17 +878,51 @@ class MainActivity : ComponentActivity() {
         return "adb shell sh ${script.absolutePath}"
     }
 
+    /**
+     * Kiosk-style fullscreen: reclaim the status bar's height for the dashboard
+     * (physical buttons make the nav bar redundant too).
+     *
+     * The old `systemUiVisibility` flags this used are DEPRECATED and simply
+     * IGNORED from Android 11 (API 30) on, which is why the gesture bar sat
+     * across the bottom of the Pixel Tablet while the same code hid everything
+     * on the HA100's 8.1. WindowInsetsControllerCompat is the supported route
+     * and goes back to API 21, so both devices take the same path.
+     *
+     * Re-applied on focus gain: a transient swipe, a dialog, or the screen
+     * turning on all bring the bars back, and nothing puts them away again.
+     */
+    private fun applyImmersive() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyImmersive()
+    }
+
+    /**
+     * Pin the screen orientation from the layout. setRequestedOrientation beats
+     * the manifest, so the manifest stays `portrait` and a handheld remote can
+     * never rotate -- only a device whose layout explicitly asks for landscape
+     * gets it.
+     */
+    private fun applyOrientation() {
+        requestedOrientation = when (dashboard.config.ui.orientation.lowercase()) {
+            "landscape" -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            "auto", "sensor", "user" -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Kiosk-style fullscreen: reclaim the status bar's height for the
-        // dashboard (physical buttons make the nav bar redundant too).
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = (
-            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
-                or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-            )
+        applyImmersive()
 
         // /sdcard/astrion/dashboard.json lives on shared storage, and the mic is
         // needed for voice — all classic runtime permissions on Android 8.1.
@@ -1042,6 +1080,10 @@ class MainActivity : ComponentActivity() {
                     statusOpen = statusOpen,
                     onStatusOpen = { statusOpen = it },
                     bridgeConnected = bridgeConnected,
+                    // An on-screen dpad takes the SAME path a physical press
+                    // takes -- page bindings first, then global -- so a drawn
+                    // pad and a moulded one cannot drift apart.
+                    onHardwareKey = { key -> shortFor(key)?.let { runHotkey(it) } },
                     bridgeCommand = bridgeCommand(),
                     stockAllowed = stockAllowed,
                     onStockAllowedChange = { allow ->
@@ -1140,6 +1182,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun applyDashboard(result: DashboardLoader.Result) {
         dashboard = result
+        applyOrientation()
         rebuildBindings()
         client.setSubscribedEntities(EntityRefs.collect(result.config))
     }

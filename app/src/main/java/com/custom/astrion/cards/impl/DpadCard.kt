@@ -28,6 +28,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.custom.astrion.cards.CuratedItems
+import com.custom.astrion.ui.PickerModal
 import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRenderer
@@ -80,6 +87,27 @@ object DpadCard : CardRenderer {
         val showVolume = config.bool("volume", false)
         val showBack = config.bool("back", true)
 
+        // The app drawer, if this pad is configured with one. It hangs off the
+        // pad rather than sitting on the page because on a tablet the pad IS the
+        // remote -- reaching for apps is the same motion as reaching for OK. The
+        // physical remotes have no drawn pad, so there the same list is a pill on
+        // the page instead (see source_modal in the layout).
+        val drawer = config.options["drawer"] as? Map<*, *>
+        var drawerOpen by remember { mutableStateOf(false) }
+        if (drawerOpen && drawer != null) {
+            val entries = remember(drawer) { CuratedItems.parse(drawer["items"], ctx, drawer["target_from"] as? String) }
+            PickerModal.Show(
+                title = drawer["name"] as? String ?: "Apps",
+                entries = entries,
+                client = ctx.client,
+                columns = (drawer["columns"] as? Number)?.toInt() ?: 6,
+                tileHeight = ((drawer["item_height"] as? Number)?.toInt() ?: 56).dp,
+                fontSize = ((drawer["item_font_size"] as? Number)?.toInt() ?: 12).sp,
+                onDismiss = { drawerOpen = false },
+            )
+        }
+
+        Box(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -136,6 +164,27 @@ object DpadCard : CardRenderer {
                     Pill(ctx, HardwareKey.VOLUME_UP, "Vol +")
                 }
             }
+        }
+        if (drawer != null) {
+            val (press, click) = rememberPressFeedback { drawerOpen = true }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(10.dp)
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(ackColor(KEY, press))
+                    .pressFeedback(press, click),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Apps,
+                    contentDescription = drawer["name"] as? String ?: "Apps",
+                    tint = FG,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+        }
         }
     }
 

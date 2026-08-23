@@ -228,14 +228,34 @@ class HaClient(
         })
     }
 
-    suspend fun fetchBitmap(path: String): ImageBitmap? = withContext(Dispatchers.IO) {
+    /**
+     * @param maxPx if > 0, decode downscaled so the longest edge is about this
+     *   many pixels. A grid of 40 logos decoded at full size is ~10 MB of
+     *   bitmaps, against a ~6 MB heap on the HA100 -- the tiles are ~120dp, so
+     *   full-resolution decoding buys nothing and costs the app.
+     *
+     * NOTE the Authorization header goes to whatever host `path` names. That is
+     * fine for HA's own URLs and a token leak for anything else, which is why
+     * card artwork is mirrored under /local rather than hot-linked.
+     */
+    suspend fun fetchBitmap(path: String, maxPx: Int = 0): ImageBitmap? = withContext(Dispatchers.IO) {
         try {
             val url = if (path.startsWith("http")) path else baseUrl.trimEnd('/') + path
             val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
             imageHttp.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 val bytes = resp.body?.bytes() ?: return@withContext null
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                val opts = BitmapFactory.Options()
+                if (maxPx > 0) {
+                    opts.inJustDecodeBounds = true
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                    var sample = 1
+                    var longest = maxOf(opts.outWidth, opts.outHeight)
+                    while (longest / 2 >= maxPx) { sample *= 2; longest /= 2 }
+                    opts.inSampleSize = sample
+                    opts.inJustDecodeBounds = false
+                }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
             }
         } catch (e: Exception) {
             Log.w(TAG, "fetchBitmap failed for $path", e)

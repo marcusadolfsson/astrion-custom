@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Blinds
 import androidx.compose.material.icons.filled.BrightnessMedium
@@ -35,6 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.custom.astrion.cards.CuratedItems
+import com.custom.astrion.ui.PickerModal
 import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRenderer
@@ -97,15 +100,41 @@ class BubbleSelectCard : CardRenderer {
         val name = config.string("name") ?: ""
         val icon = CardIcons.forName(config.string("icon"))
         val activeEntity = config.string("active_entity")
-        val options = (config.options["options"] as? List<Map<String, Any?>>) ?: emptyList()
+        val configured = (config.options["options"] as? List<Map<String, Any?>>) ?: emptyList()
         val openOn = config.string("open_on")
 
         val currentState = activeEntity?.let { ctx.entities[it]?.state }
+
+        // Hide choices the entity will not currently accept.
+        //
+        // An input_select's `options` attribute is rebuilt at runtime by HA --
+        // the multi-view source slots are narrowed to what the VRROOM can
+        // actually carry -- but this card's list is STATIC config, so it kept
+        // offering Kaleidescape and the Switch after the engine had removed
+        // them. Picking one did nothing, which reads as a broken remote rather
+        // than an unavailable source.
+        //
+        // Only filters entries that name an `active_value` (the ones that map
+        // to a specific option) and only when the entity actually publishes a
+        // list -- a light slider row or a plain script button is untouched, and
+        // an entity with no `options` attribute behaves exactly as before.
+        val liveOptions = activeEntity
+            ?.let { ctx.entities[it] }
+            ?.attrStringList("options")
+            ?.takeIf { it.isNotEmpty() }
+        val options = remember(configured, liveOptions) {
+            if (liveOptions == null) configured
+            else configured.filter { o ->
+                val v = o["active_value"] as? String
+                v == null || v in liveOptions
+            }
+        }
         val currentName = (options.firstOrNull { it["active_value"] == currentState }?.get("name") as? String)
             ?: currentState ?: "—"
 
         var expanded by remember { mutableStateOf(false) }
-        OpenOverlays.Track(expanded)
+        var launcherOpen by remember { mutableStateOf(false) }
+        OpenOverlays.Track(expanded || launcherOpen)
 
         // When a hardware key scrolls to this bubble's (single-control) section,
         // pop the dropdown open too — the section name comes in via openTarget.
@@ -177,6 +206,60 @@ class BubbleSelectCard : CardRenderer {
                             )
                         }
                         Spacer(Modifier.width(6.dp))
+                    }
+                }
+                // Optional app launcher, drawn in the same slot as the latch:
+                // it belongs to the thing the row already names ("what is on"),
+                // so hanging it off that row costs no vertical space and puts it
+                // where you are already looking. Same list the standalone
+                // source_modal pill uses -- see CuratedItems.
+                @Suppress("UNCHECKED_CAST")
+                val launcher = config.options["launcher"] as? Map<String, Any?>
+                if (launcher != null) {
+                    val hiddenFor = (launcher["hidden_for"] as? List<String>).orEmpty()
+                    // When the launcher follows a resolver, that resolver going
+                    // to a non-entity IS the "nothing to launch onto" signal;
+                    // no second condition needed.
+                    val targetFrom = launcher["target_from"] as? String
+                    val targetOk = targetFrom == null ||
+                        (ctx.entities[targetFrom]?.state?.startsWith("media_player.") == true)
+                    if (currentState !in hiddenFor && targetOk) {
+                        val entries = remember(launcher) {
+                            CuratedItems.parse(launcher["items"], ctx, targetFrom)
+                        }
+                        val (press, click) = rememberPressFeedback { launcherOpen = true }
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(ackColor(Color(0xFF13272E), press))
+                                .pressFeedback(press, click),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                CardIcons.forName(launcher["icon"] as? String ?: "apps"),
+                                contentDescription = launcher["name"] as? String ?: "Apps",
+                                tint = Color(0xFF9FC4CE),
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                        // Wider than the latch's gap on purpose. This button sits
+                        // right beside the chevron, and the chevron is what you
+                        // reach for to change the activity -- a 6dp gap put the
+                        // launcher under the same thumb. Opening a modal by
+                        // accident is a worse miss than opening a dropdown.
+                        Spacer(Modifier.width(18.dp))
+                        if (launcherOpen) {
+                            PickerModal.Show(
+                                title = launcher["name"] as? String ?: "Apps",
+                                entries = entries,
+                                client = ctx.client,
+                                columns = (launcher["columns"] as? Number)?.toInt() ?: 3,
+                                tileHeight = ((launcher["item_height"] as? Number)?.toInt() ?: 64).dp,
+                                fontSize = ((launcher["item_font_size"] as? Number)?.toInt() ?: 12).sp,
+                                onDismiss = { launcherOpen = false },
+                            )
+                        }
                     }
                 }
                 Icon(Icons.Filled.ExpandMore, contentDescription = null, tint = Color(0xFF93AFB6))
@@ -363,6 +446,8 @@ object CardIcons {
         "curtain", "shade", "shades", "blinds" -> Icons.Filled.Blinds
         "thermostat", "climate", "ac", "temp" -> Icons.Filled.Thermostat
         "remote" -> Icons.Filled.SettingsRemote
+        // The app-drawer grid, for the launcher slot.
+        "apps", "grid", "drawer" -> Icons.Filled.Apps
         "bed", "sleep", "position" -> Icons.Filled.KingBed
         "fan", "air", "ceiling-fan" -> Icons.Filled.Air
         else -> Icons.Filled.Tune

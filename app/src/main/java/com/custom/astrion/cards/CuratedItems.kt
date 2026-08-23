@@ -42,6 +42,7 @@ object CuratedItems {
                 name = name,
                 image = m["image"] as? String,
                 section = m["section"] as? String,
+                sectionColumns = (m["section_columns"] as? Number)?.toInt(),
             ) {
                 if (service != null) {
                     val override = targetFrom

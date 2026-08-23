@@ -594,6 +594,26 @@ class HaClient(
      * A minute between attempts is slow enough not to hammer a server that really
      * is refusing us, and the banner stays up throughout either way.
      */
+    /**
+     * Try again NOW rather than waiting out the backoff.
+     *
+     * The screen coming on is the one moment we know a human is looking, and the
+     * 3s retry delay is precisely the "connection error" flash they see. Doze
+     * kills the socket while the screen is off (the app is whitelisted now, but
+     * a dropped Wi-Fi association does the same), so on wake the state is
+     * usually already ERROR and this reconnects immediately.
+     *
+     * Guarded against stacking a second socket on top of an in-flight attempt.
+     */
+    fun reconnectNow() {
+        when (_connection.value) {
+            ConnectionState.CONNECTED,
+            ConnectionState.CONNECTING,
+            ConnectionState.AUTHENTICATING -> return
+            else -> connect()
+        }
+    }
+
     private fun scheduleReconnect() {
         scope.launch {
             val state = _connection.value

@@ -1063,9 +1063,34 @@ private fun PageIndicator(
     }
 }
 
+/** How long a connection may be down before it is worth telling anyone. */
+private const val BANNER_GRACE_MS = 4000L
+
 @Composable
 private fun ConnectionBanner(connection: ConnectionState) {
     if (connection == ConnectionState.CONNECTED) return
+
+    // Don't announce a blip. Waking the screen reconnects in 2-3s, and a banner
+    // that appears and clears in that window is pure noise -- it says "something
+    // is wrong" about the normal path back from sleep. AUTH_FAILED is exempt:
+    // that one does not resolve itself, so hiding it would just delay the news.
+    //
+    // Grace applies to the transient states only, and resets whenever the state
+    // changes, so a real outage still surfaces after a couple of seconds and
+    // stays up.
+    val transient = connection == ConnectionState.CONNECTING ||
+        connection == ConnectionState.AUTHENTICATING ||
+        connection == ConnectionState.ERROR ||
+        connection == ConnectionState.DISCONNECTED
+    var settled by remember(connection) { mutableStateOf(!transient) }
+    LaunchedEffect(connection) {
+        if (transient) {
+            kotlinx.coroutines.delay(BANNER_GRACE_MS)
+            settled = true
+        }
+    }
+    if (!settled) return
+
     val (label, color) = when (connection) {
         ConnectionState.CONNECTING,
         ConnectionState.AUTHENTICATING -> "Connecting…" to Color(0xFF3A506B)

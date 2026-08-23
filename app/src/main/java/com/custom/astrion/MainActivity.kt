@@ -441,6 +441,10 @@ class MainActivity : ComponentActivity() {
                     // observed on the living-room unit. The screen coming on is
                     // also interaction, so it brightens.
                     noteDockInteraction()
+                    // The socket usually died while the screen was off, and the
+                    // reconnect backoff is exactly the "connection error" flash
+                    // that greets you on wake. Ask for it now instead.
+                    client.reconnectNow()
                 }
                 Intent.ACTION_SCREEN_OFF -> screenOffAt = SystemClock.elapsedRealtime()
                 Intent.ACTION_POWER_CONNECTED -> { charging = true; onDocked() }

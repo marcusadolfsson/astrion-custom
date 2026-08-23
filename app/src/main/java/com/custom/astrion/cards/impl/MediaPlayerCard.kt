@@ -43,6 +43,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.custom.astrion.cards.LauncherButton
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import java.time.Instant
+import kotlinx.coroutines.delay
 import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRenderer
@@ -71,6 +76,11 @@ class MediaPlayerCard : CardRenderer {
     override fun Render(config: CardConfig, ctx: CardContext) {
         val entityId = config.string("entity_id") ?: return
         val full = config.string("variant") == "full"
+        // A one-line strip: art, what's on, and the app launcher. No transport --
+        // the remote has real buttons for that, and on the tablet the D-pad
+        // does it. This is a STATUS row you glance at, not a control surface,
+        // which is also why it does not hide itself when nothing is playing.
+        val strip = config.string("variant") == "strip"
         val topButtons = (config.options["top_buttons"] as? List<Map<String, Any?>>) ?: emptyList()
         // Optional reverse/forward transport buttons, each an action map
         // {service, entity_id, data}. Shown only when set.
@@ -137,6 +147,10 @@ class MediaPlayerCard : CardRenderer {
         // the card stayed on screen as a purple square captioned with the
         // device's own name — the friendly-name fallback below standing in for
         // a title that was never there.
+        // Only the FULL card hides when idle -- a big now-playing panel with
+        // nothing playing is dead space. The strip is the opposite: it is the
+        // row that tells you the source is up at all, so it must survive an
+        // idle player and say so.
         if (full && (realTitle == null || stale)) return
 
         // The compact variant has no collapse path -- it is a persistent row --
@@ -174,6 +188,10 @@ class MediaPlayerCard : CardRenderer {
                 }
             }
 
+        // The card, then the bar UNDER it. Inside the card the bar sat over the
+        // blurred artwork and read as part of the poster; it is a separate piece
+        // of information about the card, so it lives below it.
+        Column(modifier = Modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -194,11 +212,13 @@ class MediaPlayerCard : CardRenderer {
                 )
             }
 
-            if (full) {
-                FullContent(ctx, title, artist, playing, art, mp, topButtons, reverseBtn, forwardBtn)
-            } else {
-                CompactContent(title, artist, art, mp)
+            when {
+                full -> FullContent(ctx, title, artist, playing, art, mp, topButtons, reverseBtn, forwardBtn)
+                strip -> StripContent(config, ctx, realTitle, title, artist, art)
+                else -> CompactContent(title, artist, art, mp)
             }
+        }
+        if (strip) ProgressBar(ctx, entityId)
         }
     }
 
@@ -212,6 +232,119 @@ class MediaPlayerCard : CardRenderer {
         ctx.client.callService(
             ServiceCall.of(domain, svc, entityId, *data.entries.map { it.key to it.value }.toTypedArray())
         )
+    }
+
+    /**
+     * The compact status strip: cover, what is on, and the launcher.
+     *
+     * Roughly a third the height of the full card, which is the point -- on a
+     * 480x800 remote the full panel pushed the Watch section off the screen for
+     * something you only glance at.
+     */
+    @Composable
+    @Suppress("UNCHECKED_CAST")
+    private fun StripContent(
+        config: CardConfig,
+        ctx: CardContext,
+        realTitle: String?,
+        title: String,
+        artist: String?,
+        art: ImageBitmap?,
+    ) {
+        val artSize = config.int("art_size", 68).dp
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Square, not the compact row's circle: this is cover art and a
+            // channel logo, both of which get cropped into nonsense by a circle.
+            val artMod = Modifier.size(artSize).clip(RoundedCornerShape(10.dp))
+            if (art != null) {
+                Image(art, null, modifier = artMod, contentScale = ContentScale.Crop)
+            } else {
+                Box(artMod.background(Color(0xFF24404A)))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    // Idle still says something useful -- the source is on, it
+                    // just has nothing playing. Blank here would read as broken.
+                    if (realTitle != null) title else "Nothing playing",
+                    color = if (realTitle != null) Color(0xFFF1F4FA) else Color(0xFF93AFB6),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!artist.isNullOrBlank()) {
+                    Text(artist, color = Color(0xFFB6BECC), fontSize = 12.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            LauncherButton(config.options["launcher"] as? Map<String, Any?>, ctx)
+        }
+    }
+
+    /**
+     * Elapsed / remaining, when the source publishes it.
+     *
+     * Drawn only when there is a real duration -- an Apple TV app that reports
+     * nothing gets no bar rather than a permanently empty one, which would read
+     * as "stuck at zero" instead of "not reported".
+     *
+     * The position is INTERPOLATED. HA updates media_position only every few
+     * seconds (and the Kaleidescape only on state changes), so a bar drawn
+     * straight from the attribute jumps in visible steps; adding the time since
+     * media_position_updated_at makes it move like a progress bar should.
+     */
+    @Composable
+    private fun ProgressBar(ctx: CardContext, entityId: String?) {
+        val e = entityId?.let { ctx.entities[it] } ?: return
+        val duration = e.attrDouble("media_duration")?.takeIf { it > 0 } ?: return
+        val reported = e.attrDouble("media_position") ?: return
+        val playing = e.state == "playing"
+
+        // `now` is state, ticked once a second while playing -- reading it is
+        // what re-renders the bar between HA's sparse position updates.
+        var now by remember { mutableStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(playing, reported) {
+            while (playing) {
+                now = System.currentTimeMillis()
+                delay(1000)
+            }
+        }
+        val updatedAt = e.attrString("media_position_updated_at")
+            ?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
+        val drift = if (playing && updatedAt != null) (now - updatedAt).coerceAtLeast(0L) / 1000.0 else 0.0
+        val pos = (reported + drift).coerceIn(0.0, duration)
+
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
+            Box(
+                Modifier.fillMaxWidth().height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0x33FFFFFF)),
+            ) {
+                Box(
+                    Modifier.fillMaxWidth((pos / duration).toFloat()).height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color(0xFF4C8DFF)),
+                )
+            }
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                Text(clock(pos), color = Color(0xFF93AFB6), fontSize = 11.sp)
+                Spacer(Modifier.weight(1f))
+                Text("-" + clock(duration - pos), color = Color(0xFF93AFB6), fontSize = 11.sp)
+            }
+        }
+    }
+
+    /** h:mm:ss, dropping the hour when there isn't one. */
+    private fun clock(seconds: Double): String {
+        val t = seconds.toLong().coerceAtLeast(0)
+        val h = t / 3600
+        val m = (t % 3600) / 60
+        val sec = t % 60
+        return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
     }
 
     // ---- compact (main page): one row, volume only, buttons right-justified --

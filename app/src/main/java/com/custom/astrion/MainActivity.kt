@@ -39,6 +39,7 @@ import com.custom.astrion.config.DashboardConfig
 import com.custom.astrion.config.DashboardLoader
 import android.content.IntentFilter
 import com.custom.astrion.config.EntityRefs
+import androidx.core.content.ContextCompat
 import com.custom.astrion.config.HotkeyConfig
 import com.custom.astrion.config.JsonPlain
 import com.custom.astrion.config.PageConfig
@@ -898,7 +899,15 @@ class MainActivity : ComponentActivity() {
 
         // adb-only mic diagnostic; see MicProbe. Registered at runtime rather
         // than in the manifest so it exists only while the app is alive.
-        registerReceiver(micProbe, IntentFilter(MicProbe.ACTION))
+        // EXPORTED because the sender is `adb shell am broadcast`, i.e. a
+        // different uid. From Android 14 (targetSdk 34) a receiver for a
+        // non-system action MUST state its export flag or registerReceiver
+        // throws SecurityException -- which crashed the app on launch on the
+        // Pixel Tablet (Android 17). The HA100s run 8.1 and never hit it.
+        // ContextCompat applies the flag only on API 33+, so minSdk 26 is fine.
+        ContextCompat.registerReceiver(
+            this, micProbe, IntentFilter(MicProbe.ACTION), ContextCompat.RECEIVER_EXPORTED,
+        )
 
         setupMotionWake()
 
@@ -916,6 +925,9 @@ class MainActivity : ComponentActivity() {
         client = HaClient(baseUrl = conn.url, token = conn.token)
         voice = VoiceSession(baseUrl = conn.url, token = conn.token)
         rebuildBindings()
+        // Point the layout cache at app-private storage before the first load;
+        // shared storage is unwritable from Android 11 on. See DashboardLoader.
+        DashboardLoader.init(this)
         // Load the cached layout first so the initial subscribe is already
         // filtered — avoids a 0.7 MB whole-instance seed on every launch.
         reloadDashboard()
@@ -929,7 +941,12 @@ class MainActivity : ComponentActivity() {
             startSetupServer()
         }
 
-        registerReceiver(
+        // All four are protected system broadcasts, so this one is exempt from
+        // the Android 14 flag requirement -- but state it anyway: NOT_EXPORTED
+        // is the truth here, and being explicit stops the next reader wondering
+        // whether this was simply missed.
+        ContextCompat.registerReceiver(
+            this,
             screenWatcher,
             IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
@@ -937,6 +954,7 @@ class MainActivity : ComponentActivity() {
                 addAction(Intent.ACTION_POWER_CONNECTED)
                 addAction(Intent.ACTION_POWER_DISCONNECTED)
             },
+            ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         bridge.start()
         battery.start()

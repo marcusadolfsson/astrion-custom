@@ -1,5 +1,6 @@
 package com.custom.astrion.config
 
+import android.content.Context
 import android.os.Environment
 import android.util.Log
 import com.custom.astrion.cards.CardConfig
@@ -54,9 +55,40 @@ object DashboardLoader {
      */
     const val REMOTE_PATH = "/api/astrion_dashboard"
 
+    /**
+     * App-private cache dir, set once at startup. Null until [init] runs.
+     *
+     * The cache used to live at /sdcard/astrion/dashboard.json so it could be
+     * edited with `adb push`. That is fine on the HA100s (Android 8.1) and
+     * IMPOSSIBLE from Android 11 on: scoped storage makes an app's own writes to
+     * a non-media path in shared storage fail, so the cache silently stopped
+     * working on the Pixel Tablet. App-private storage works on every version.
+     */
+    private var privateDir: File? = null
+
+    /** Pre-scoped-storage location; still read once, to seed [privateDir]. */
+    private val legacyFile: File
+        get() = File(Environment.getExternalStorageDirectory(), "astrion/dashboard.json")
+
+    /**
+     * Point the cache at app-private storage. Call before the first [load].
+     * Carries an existing shared-storage layout across on first run so a device
+     * upgrading from the old path keeps its offline cache.
+     */
+    fun init(context: Context) {
+        privateDir = context.filesDir
+        val priv = File(context.filesDir, "dashboard.json")
+        if (!priv.exists()) {
+            runCatching { legacyFile.readText() }.getOrNull()?.let { seed ->
+                runCatching { priv.writeText(seed) }
+                    .onSuccess { Log.i(TAG, "seeded layout cache from ${legacyFile.path}") }
+            }
+        }
+    }
+
     /** Local cache, written by a successful sync; used offline / before first sync. */
     val configFile: File
-        get() = File(Environment.getExternalStorageDirectory(), "astrion/dashboard.json")
+        get() = privateDir?.let { File(it, "dashboard.json") } ?: legacyFile
 
     /**
      * Validate freshly-fetched remote JSON and, if valid AND different from the
@@ -65,15 +97,22 @@ object DashboardLoader {
      */
     fun loadFromText(text: String): Result? {
         if (runCatching { configFile.readText() }.getOrNull() == text) return null
-        return try {
-            val cfg = parse(text) // throws on malformed JSON
-            configFile.parentFile?.mkdirs()
-            configFile.writeText(text)
-            Result(cfg, null)
+        val cfg = try {
+            parse(text) // throws on malformed JSON
         } catch (e: Exception) {
             Log.w(TAG, "remote dashboard.json invalid, keeping cache: ${e.message}")
-            null
+            return null
         }
+        // Caching is best-effort and MUST NOT gate the config. This used to sit
+        // inside the same try as parse(), so an unwritable cache was reported as
+        // "invalid" and threw away a layout that had just been fetched and
+        // parsed successfully -- the Pixel Tablet showed built-in demo defaults
+        // while talking to HA perfectly well.
+        runCatching {
+            configFile.parentFile?.mkdirs()
+            configFile.writeText(text)
+        }.onFailure { Log.w(TAG, "couldn't cache layout at ${configFile.path}: ${it.message}") }
+        return Result(cfg, null)
     }
 
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }

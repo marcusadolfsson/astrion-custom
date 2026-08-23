@@ -409,10 +409,15 @@ private fun BoxScope.VolumeOverlay(cfg: OverlayConfig, ctx: CardContext) {
     val muted = cfg.muteEntity?.let { ctx.entities[it]?.attr("is_volume_muted") }
         ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBoolean() }
 
-    var visible by remember { mutableStateOf(false) }
-    var lastVol by remember { mutableStateOf<Float?>(null) }
-    var lastMuted by remember { mutableStateOf<Boolean?>(null) }
-    var seeded by remember { mutableStateOf(false) }
+    // Keyed on the CONFIG. Swiping to another page swaps this overlay's entities
+    // for a different room's, and un-keyed state carried the old room's volume
+    // across -- so the first reading from the new room compared against the old
+    // one, looked like a change, and flashed the OSD on every page swipe.
+    // Re-keying re-seeds instead.
+    var visible by remember(cfg) { mutableStateOf(false) }
+    var lastVol by remember(cfg) { mutableStateOf<Float?>(null) }
+    var lastMuted by remember(cfg) { mutableStateOf<Boolean?>(null) }
+    var seeded by remember(cfg) { mutableStateOf(false) }
 
     // Re-read every recomposition so the gate tracks its entity live. Not a
     // LaunchedEffect key: the OSD should never appear merely because the gate

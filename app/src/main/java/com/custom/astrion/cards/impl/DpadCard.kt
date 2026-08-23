@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.custom.astrion.cards.CuratedItems
 import com.custom.astrion.ui.PickerModal
+import com.custom.astrion.cards.LauncherButton
 import com.custom.astrion.cards.CardConfig
 import com.custom.astrion.cards.CardContext
 import com.custom.astrion.cards.CardRenderer
@@ -86,26 +87,16 @@ object DpadCard : CardRenderer {
         val showTransport = config.bool("transport", false)
         val showVolume = config.bool("volume", false)
         val showBack = config.bool("back", true)
+        val showSkip = config.bool("skip", false)
+        val keySize = config.int("key_size", 66)
 
         // The app drawer, if this pad is configured with one. It hangs off the
         // pad rather than sitting on the page because on a tablet the pad IS the
         // remote -- reaching for apps is the same motion as reaching for OK. The
         // physical remotes have no drawn pad, so there the same list is a pill on
         // the page instead (see source_modal in the layout).
-        val drawer = config.options["drawer"] as? Map<*, *>
-        var drawerOpen by remember { mutableStateOf(false) }
-        if (drawerOpen && drawer != null) {
-            val entries = remember(drawer) { CuratedItems.parse(drawer["items"], ctx, drawer["target_from"] as? String) }
-            PickerModal.Show(
-                title = drawer["name"] as? String ?: "Apps",
-                entries = entries,
-                client = ctx.client,
-                columns = (drawer["columns"] as? Number)?.toInt() ?: 6,
-                tileHeight = ((drawer["item_height"] as? Number)?.toInt() ?: 56).dp,
-                fontSize = ((drawer["item_font_size"] as? Number)?.toInt() ?: 12).sp,
-                onDismiss = { drawerOpen = false },
-            )
-        }
+        @Suppress("UNCHECKED_CAST")
+        val drawer = config.options["drawer"] as? Map<String, Any?>
 
         Box(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -117,23 +108,54 @@ object DpadCard : CardRenderer {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Key(ctx, HardwareKey.UP, Icons.Filled.KeyboardArrowUp)
-
+            // Pad in the middle, volume down the left, skip down the right.
+            // Flanking columns rather than extra rows: they keep the pad itself
+            // big, and on a wall tablet the pad is the thing you aim at without
+            // looking.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                if (showBack) Pill(ctx, HardwareKey.BACK, "Back")
-                Key(ctx, HardwareKey.LEFT, Icons.Filled.KeyboardArrowLeft)
-                // OK is the only key drawn in the accent colour: on a pad of
-                // five identical circles the thumb needs one landmark to aim
-                // from without looking down.
-                Key(ctx, HardwareKey.CENTER, null, label = "OK", bg = CENTER, size = 78)
-                Key(ctx, HardwareKey.RIGHT, Icons.Filled.KeyboardArrowRight)
-                if (showBack) Pill(ctx, HardwareKey.MENU, "Menu")
+                if (showVolume) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Pill(ctx, HardwareKey.VOLUME_UP, "Vol +", width = 82)
+                        Pill(ctx, HardwareKey.VOLUME_DOWN, "Vol −", width = 82)
+                    }
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Key(ctx, HardwareKey.UP, Icons.Filled.KeyboardArrowUp, size = keySize)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Key(ctx, HardwareKey.LEFT, Icons.Filled.KeyboardArrowLeft, size = keySize)
+                        // OK is the only key in the accent colour: on a pad of
+                        // five identical circles the thumb needs one landmark to
+                        // aim from without looking down.
+                        Key(ctx, HardwareKey.CENTER, null, label = "OK", bg = CENTER, size = (keySize * 6) / 5)
+                        Key(ctx, HardwareKey.RIGHT, Icons.Filled.KeyboardArrowRight, size = keySize)
+                    }
+                    Key(ctx, HardwareKey.DOWN, Icons.Filled.KeyboardArrowDown, size = keySize)
+                }
+                if (showSkip) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Pill(ctx, HardwareKey.PAGE_UP, "Next", width = 82)
+                        Pill(ctx, HardwareKey.PAGE_DOWN, "Prev", width = 82)
+                    }
+                }
             }
 
-            Key(ctx, HardwareKey.DOWN, Icons.Filled.KeyboardArrowDown)
+            // Back and Menu BELOW the pad. Flanking it, they competed with the
+            // pad for the same reach and pushed the arrows inward.
+            if (showBack) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill(ctx, HardwareKey.BACK, "Back")
+                    Pill(ctx, HardwareKey.MENU, "Menu")
+                }
+            }
 
             // Explicit rows win over the `transport:` shorthand. A drawn pad can
             // carry buttons no physical remote has -- rewind and fast-forward
@@ -157,32 +179,15 @@ object DpadCard : CardRenderer {
                 }
             }
 
-            if (showVolume) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Pill(ctx, HardwareKey.VOLUME_DOWN, "Vol −")
-                    Pill(ctx, HardwareKey.MUTE, "Mute")
-                    Pill(ctx, HardwareKey.VOLUME_UP, "Vol +")
-                }
-            }
         }
         if (drawer != null) {
-            val (press, click) = rememberPressFeedback { drawerOpen = true }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(10.dp)
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(ackColor(KEY, press))
-                    .pressFeedback(press, click),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Apps,
-                    contentDescription = drawer["name"] as? String ?: "Apps",
-                    tint = FG,
-                    modifier = Modifier.size(26.dp),
-                )
+            // The SHARED button, not a local copy of it. The copy skipped
+            // LauncherButton's "is there anything to launch onto" test, so the
+            // pad offered an Apple TV drawer while the room was watching
+            // Kaleidescape -- and tapping it would have switched the Apple TV
+            // out from under a film that was playing.
+            Box(modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)) {
+                LauncherButton(drawer, ctx, size = 46.dp)
             }
         }
         }
@@ -242,11 +247,17 @@ object DpadCard : CardRenderer {
     }
 
     @Composable
-    private fun Pill(ctx: CardContext, key: HardwareKey, label: String, wide: Boolean = false) {
+    private fun Pill(
+        ctx: CardContext,
+        key: HardwareKey,
+        label: String,
+        wide: Boolean = false,
+        width: Int = 0,
+    ) {
         val (state, click) = rememberPressFeedback { ctx.onHardwareKey(key) }
         Box(
             modifier = Modifier
-                .width(if (wide) 132.dp else 88.dp)
+                .width(if (width > 0) width.dp else if (wide) 132.dp else 88.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(ackColor(KEY, state))
                 .pressFeedback(state, click)

@@ -50,6 +50,10 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import com.custom.astrion.ha.HaClient
 
 /**
@@ -190,7 +194,7 @@ object PickerModal {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(gridCols),
                         state = gridState,
-                        modifier = Modifier.weight(1f).padding(start = 10.dp, end = if (showRail) 2.dp else 10.dp),
+                        modifier = Modifier.weight(1f).padding(start = 10.dp, end = if (showRail) 0.dp else 10.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -232,10 +236,13 @@ object PickerModal {
                         // and it scrubs. Precision stops mattering, which is the
                         // only way this works one-handed.
                         val letters = remember(letterAt) { letterAt.toList() }
-                        var railTop by remember { mutableStateOf(0f) }
                         var active by remember { mutableStateOf<Char?>(null) }
+                        // Where the finger is, so the preview can sit next to it.
+                        var touchY by remember { mutableStateOf(0f) }
+                        var railHeight by remember { mutableStateOf(0) }
                         fun pickAt(y: Float, h: Int) {
                             if (h <= 0 || letters.isEmpty()) return
+                            touchY = y
                             val idx = ((y / h) * letters.size).toInt().coerceIn(0, letters.lastIndex)
                             val (letter, slot) = letters[idx]
                             if (active != letter) {
@@ -243,10 +250,43 @@ object PickerModal {
                                 scope.launch { gridState.scrollToItem(slot) }
                             }
                         }
+                        // 27 letters over 800px is ~3mm each -- no thumb hits
+                        // that, and asking for precision was the mistake. So the
+                        // rail shows a big preview of wherever the finger is and
+                        // scrolls live: land near S, SEE that you got R, slide a
+                        // little, release. Being able to correct without lifting
+                        // is what makes an imprecise target usable.
+                        Box(contentAlignment = Alignment.CenterEnd) {
+                        active?.let { letter ->
+                            Box(
+                                modifier = Modifier
+                                    .offset { IntOffset(-58.dp.roundToPx(), touchY.roundToInt() - (railHeight / 2)) }
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(32.dp))
+                                    .background(Color(0xFF2E7D95)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    letter.toString(),
+                                    color = Color.White,
+                                    fontSize = 30.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
                         Column(
                             modifier = Modifier
                                 .fillMaxHeight()
-                                .width(34.dp)
+                                .onSizeChanged { railHeight = it.height }
+                                // Wider, inset from the screen edge, and given a
+                                // visible chip. At 34dp flush to the edge this
+                                // was both hard to aim at and easy to mistake
+                                // for decoration -- the outermost pixels of a
+                                // panel are the worst place to put a control.
+                                .padding(vertical = 4.dp, horizontal = 4.dp)
+                                .width(48.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0x14FFFFFF))
                                 .pointerInput(letters) {
                                     detectVerticalDragGestures(
                                         onDragStart = { pickAt(it.y, size.height) },
@@ -271,6 +311,7 @@ object PickerModal {
                                     )
                                 }
                             }
+                        }
                         }
                     }
                 }

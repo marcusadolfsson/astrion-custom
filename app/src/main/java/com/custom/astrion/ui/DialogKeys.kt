@@ -64,8 +64,18 @@ fun ForwardHardwareKeys() {
         if (activity != null && window != null && original != null) {
             Log.i("AstrionKeys", "dialog key forwarding attached")
             window.callback = object : Window.Callback by original {
-                override fun dispatchKeyEvent(event: KeyEvent): Boolean =
-                    activity.dispatchKeyEvent(event) || original.dispatchKeyEvent(event)
+                override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                    // BACK belongs to the MODAL, not the page underneath. It is
+                    // bound to the AV back action, so forwarding it first meant
+                    // the source device stepped back and the modal stayed open
+                    // -- the one key whose meaning genuinely changes while a
+                    // modal is up. Everything else still reaches the page, so
+                    // volume and transport keep working over the top of it.
+                    if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                        return original.dispatchKeyEvent(event)
+                    }
+                    return activity.dispatchKeyEvent(event) || original.dispatchKeyEvent(event)
+                }
             }
         }
         onDispose { if (window != null && original != null) window.callback = original }

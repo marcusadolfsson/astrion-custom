@@ -318,7 +318,11 @@ class MediaPlayerCard : CardRenderer {
         val drift = if (playing && updatedAt != null) (now - updatedAt).coerceAtLeast(0L) / 1000.0 else 0.0
         val pos = (reported + drift).coerceIn(0.0, duration)
 
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
+        // Top padding only. A bottom pad here double-counts with the page's own
+        // card spacing, which made the gap under the bar 6dp wider than every
+        // other card-to-section gap -- so the divider after it sat visibly
+        // lower than the ones further down the page.
+        Column(modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 6.dp)) {
             Box(
                 Modifier.fillMaxWidth().height(4.dp)
                     .clip(RoundedCornerShape(2.dp))

@@ -282,6 +282,24 @@ class MainActivity : ComponentActivity() {
     /** When the display last turned on, for telling a waking press from a normal one. */
     @Volatile private var screenOnAt = 0L
 
+    /**
+     * Interactive state, POLLED, not sampled at the moment a key arrives.
+     *
+     * The bridge reads evdev, which is the earliest point in the chain: it sees
+     * the press before PhoneWindowManager has finished waking the display, but
+     * `isInteractive` can flip true within a millisecond or two of that same
+     * press, and ACTION_SCREEN_ON reaches this process much later still. Ask
+     * live and the answer is "awake"; consult screenOnAt and it is stale from
+     * the previous wake. Both say "not a waking press", the guard drops it, and
+     * the remote lights up having done nothing -- which is exactly what a dead
+     * key looks like.
+     *
+     * So the state is sampled continuously and read from the cache. The cache
+     * lags by up to POLL_MS, which is the point: at the instant the press
+     * arrives it still holds what the screen was BEFORE the press woke it.
+     */
+    @Volatile private var interactiveSample = true
+
     /** When the display last turned off, for the motion-wake settle window. */
     @Volatile private var screenOffAt = 0L
 
@@ -720,9 +738,9 @@ class MainActivity : ComponentActivity() {
                 // sample -- which made the bridge skip the exact press it exists
                 // for. So also treat "the screen came on within the last moment"
                 // as dark: that transition IS this press waking it.
-                val awake = (getSystemService(POWER_SERVICE) as PowerManager).isInteractive
+                // The CACHE, not a live read -- see interactiveSample.
                 val justWoke = (SystemClock.elapsedRealtime() - screenOnAt) < WAKE_GRACE_MS
-                (!awake) || justWoke
+                (!interactiveSample) || justWoke
             },
             onQuietHandled = { sleepScreen() },
         ) { key ->
@@ -1157,6 +1175,20 @@ class MainActivity : ComponentActivity() {
                     if (screensaverOn) applyDockDisplay()
                 }
                 delay(30_000)
+            }
+        }
+        // The interactive cache. 150ms costs a boolean read per tick and is
+        // the whole fix for a waking press being judged by the state it caused.
+        lifecycleScope.launch {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            while (true) {
+                val now = pm.isInteractive
+                // Record the transition here too: this is up to a full broadcast
+                // earlier than ACTION_SCREEN_ON, which is what made screenOnAt
+                // useless for judging the press that caused it.
+                if (now && !interactiveSample) screenOnAt = SystemClock.elapsedRealtime()
+                interactiveSample = now
+                delay(150)
             }
         }
         // Poll the client's flag for display only. A StateFlow would be tidier,

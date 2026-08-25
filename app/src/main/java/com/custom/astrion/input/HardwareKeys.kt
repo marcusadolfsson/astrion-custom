@@ -80,6 +80,13 @@ enum class HardwareKey {
          */
         private val SCAN_MAP: Map<Int, HardwareKey> = mapOf(
             59 to HOME,          // KEY_F1
+            // KEY_F2 -- the physical Off button. Android delivers it as keycode
+            // 132, which the map above already handles, so Off worked whenever
+            // the screen was on and did nothing at all from a dark one: the
+            // bridge looks up SCANCODES, and this was the only F-key missing
+            // from that half. Found by elimination -- the keypad reports
+            // KEY_F1..KEY_F11 and every other one was here.
+            60 to POWER,         // KEY_F2
             61 to VOICE,         // KEY_F3
             62 to LIGHT,         // KEY_F4
             63 to CURTAIN,       // KEY_F5  (labelled "shade")

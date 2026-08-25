@@ -115,8 +115,22 @@ class BridgeClient(
                                     // page it led to rather than the one it
                                     // arrived on.
                                     val quiet = key in quietKeys()
-                                    onKey(key)
+                                    // Lock FIRST, then act. The display is
+                                    // already lit by the time we get here --
+                                    // the keypad is a kernel wakeup source, so
+                                    // nothing in this app can stop the wake --
+                                    // and every millisecond between now and
+                                    // lockNow() is visible as a flash. Running
+                                    // the action first put a service call and a
+                                    // Compose recomposition in front of it, on a
+                                    // Main thread already busy drawing the very
+                                    // frame we are about to throw away.
+                                    //
+                                    // The action does not need the screen: it is
+                                    // a websocket send on a background thread,
+                                    // and locking does not stop the process.
                                     if (quiet) onQuietHandled()
+                                    onKey(key)
                                 }
                             }
                         }

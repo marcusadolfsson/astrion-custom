@@ -83,6 +83,49 @@ app compensates in software, which would explain how a unit ships this way.
 
 ---
 
+## Accelerometer: intermittent implausible samples on one unit
+
+A different fault from the Z-axis bias above, on a different remote, and it does
+not show up at rest — the sensor reads a clean 9.82 m/s² when you go looking.
+
+Instead it **intermittently returns z ≈ 1.45 m/s² instead of ≈ 9.81**, about
+0.15 g. The bad reading is **always exactly 1.46**, never a scatter, which is
+what marks it as a driver artefact rather than noise.
+
+Interleaved with good samples it drags the low-passed gravity estimate down in
+steps, and the motion detector fires on a device nobody is touching:
+
+```
+mag=9.83  prevMag=1.46  ->  jerk = |9.83-1.46|/9.81 = 0.85     (threshold 0.25)
+mag=1.46  prevMag=1.46  ->  tilt = 18.4°                        (threshold 10°)
+ref=[0.19 -0.09 9.82]   <- resting reference CORRECT, not stale
+g z:  9.16 -> 8.26 -> 6.92 -> 6.77 -> 9.33 -> 6.69 -> 9.09
+```
+
+The visible symptom was the screen lighting roughly every 30 seconds on a remote
+lying flat — `screen_off_timeout` plus `settle_seconds`, re-firing the moment the
+settle window reopened.
+
+**Checking your own unit.** The fix logs the first discard, so the cheapest test
+is to look for it:
+
+```
+adb shell "logcat -d -s AstrionKeys" | grep implausible
+W AstrionKeys: discarding implausible accelerometer samples
+               (first was 1.46 m/s^2, expected ~9.81) (device=master_1)
+```
+
+Two traps if you go hunting yourself. **`dumpsys sensorservice` will not show
+it** — it keeps only the last 50 events, about 3 seconds, and you will sample a
+clean stretch. And **adb suppresses the symptom entirely**: with a session
+attached the device never suspends and the bursts stop, so `suspend_stats`
+`success` sits still and nothing fires. Detach, wait, then reconnect and read the
+log buffer, which holds hours.
+
+Two plausible explanations were wrong before the sample values were logged: the
+resting reference was never stale, and sample delivery never stopped (`gap=0ms`
+throughout). Neither is visible from `tilt` and `jerk` alone.
+
 ## Dock: with the USB-C cover removed, the pins only meet when seated flush
 
 Getting at the USB-C port means undoing two screws and lifting the plastic strip

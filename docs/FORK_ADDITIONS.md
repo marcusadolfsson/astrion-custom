@@ -922,6 +922,23 @@ never have converged.
 > The fault itself, the raw driver counts, and how to check your own unit are in
 > [HARDWARE_NOTES.md](HARDWARE_NOTES.md#accelerometer-constant-z-axis-bias-on-one-unit).
 
+Samples below **half a g are discarded before they touch any state** — not the
+gravity estimate, not `lastMagnitude`, not the stillness tracker. One remote here
+intermittently returns z ≈ 1.45 m/s² instead of ≈ 9.81 (always exactly 1.46, so a
+driver artefact rather than noise); interleaved with good readings it dragged the
+gravity estimate down in steps, which reads as an ~18° tilt against a perfectly
+correct reference while the climb back reads as jerk 0.84. Both thresholds fired
+on a remote lying untouched on a dresser, roughly every 30 seconds.
+
+Only the **low** side is rejected. Real movement pushes magnitude *above* 1 g;
+only free fall takes it toward zero, and a remote resting on furniture does not
+free-fall several times a minute. The first discard logs once, so a faulty sensor
+announces itself rather than being diagnosed twice.
+
+> The fault, how to check your own unit, and the two measurement traps that make
+> it hard to catch are in
+> [HARDWARE_NOTES.md](HARDWARE_NOTES.md#accelerometer-intermittent-implausible-samples-on-one-unit).
+
 `ignore_while_charging` skips motion wake entirely while docked. A remote on
 power is sitting still by definition, and the hand reaching for it will press
 something.

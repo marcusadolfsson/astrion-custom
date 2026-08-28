@@ -27,8 +27,8 @@ android {
         // headroom while covering the device; targetSdk stays modern.
         minSdk = 26
         targetSdk = 34
-        versionCode = 143
-        versionName = "0.97.1"
+        versionCode = 144
+        versionName = "0.97.2"
 
         buildConfigField("String", "HA_URL", "\"${secret("haUrl", "http://YOUR_HA_IP:8123")}\"")
         buildConfigField("String", "HA_TOKEN", "\"${secret("haToken", "YOUR_LONG_LIVED_ACCESS_TOKEN")}\"")

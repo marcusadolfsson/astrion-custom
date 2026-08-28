@@ -99,6 +99,20 @@ class MainActivity : ComponentActivity() {
          * back down, slow enough that one jolt barely moves it.
          */
         const val GRAVITY_LPF = 0.15f
+        /**
+         * Samples below this fraction of g are discarded as impossible.
+         *
+         * master_1's accelerometer intermittently reports z ~1.45 m/s^2 instead
+         * of ~9.81. Captured 2026-08-28 with mag/prevMag in the motion log: the
+         * bad reading is ALWAYS exactly 1.46, never a scatter, so it is a driver
+         * artefact rather than noise.
+         *
+         * Only the LOW side is rejected. Real movement pushes magnitude ABOVE
+         * 1 g; only free fall takes it toward zero, and a remote on a dresser
+         * does not free-fall several times a minute. 0.5 leaves room for a
+         * genuine drop to still register while sitting far above the artefact.
+         */
+        const val IMPLAUSIBLE_LOW_RATIO = 0.5f
 
         /** How far resting |a| may sit from 1 g before it is worth warning about. */
         const val GRAVITY_EARTH_TOLERANCE = 2.0f
@@ -154,6 +168,8 @@ class MainActivity : ComponentActivity() {
     private var refZ = 0f
     /** One-shot guard for the resting-gravity sanity warning. */
     private var biasWarned = false
+    /** One-shot, so a faulty sensor says so once instead of once per sample. */
+    private var implausibleWarned = false
     /** Previous gravity estimate, for the stillness test. */
     private var lastGx = 0f
     private var lastGy = 0f
@@ -186,6 +202,32 @@ class MainActivity : ComponentActivity() {
             val (x, y, z) = event.values
             val mag = sqrt(x * x + y * y + z * z)
             if (mag < 0.001f) return
+
+            // Drop impossible samples BEFORE they touch any state -- not the
+            // gravity estimate, not lastMagnitude, not the still tracker.
+            //
+            // This is the whole reason master_1 woke itself every ~30s on a
+            // dresser. Interleaved with good readings, the bogus ~1.46 dragged
+            // the low-passed gravity estimate down in steps (9.82 -> 8.26 ->
+            // 6.92 -> 6.69), which reads as an ~18 degree tilt against a
+            // perfectly CORRECT resting reference, and the trip back up reads
+            // as jerk 0.84. Both thresholds then fire on a remote that never
+            // moved.
+            //
+            // Two earlier theories died on the data this guard is built from:
+            // the reference was never stale (`ref=[0.19 -0.09 9.82]`, exactly
+            // right) and sample delivery never stopped (`gap=0ms` throughout).
+            // Neither was visible until mag/prevMag/gap were logged, and
+            // neither is diagnosable over adb, which keeps the device out of
+            // suspend and stops the bursts entirely.
+            if (mag < SensorManager.GRAVITY_EARTH * IMPLAUSIBLE_LOW_RATIO) {
+                if (!implausibleWarned) {
+                    implausibleWarned = true
+                    Log.w(KEY_TAG, "discarding implausible accelerometer samples (first was %.2f m/s^2, expected ~9.81) (device=%s)"
+                        .format(mag, deviceName))
+                }
+                return
+            }
 
             // Gap since the previous sample. Recorded before the seed branch
             // below returns, so a re-seed still leaves a usable timestamp.

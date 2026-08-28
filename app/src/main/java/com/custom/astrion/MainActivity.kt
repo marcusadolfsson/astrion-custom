@@ -160,6 +160,24 @@ class MainActivity : ComponentActivity() {
     private var lastGz = 0f
     /** When the remote last moved; stillness is measured from here. */
     private var stillSince = 0L
+    /**
+     * When the previous accelerometer sample arrived. LOGGING ONLY -- nothing
+     * branches on it.
+     *
+     * master_1 woke itself roughly every 30s on a dresser (2026-08-28) with a
+     * demonstrably healthy sensor: a clean 9.82 m/s^2 at rest, yet the detector
+     * reported jerk=0.84 and a tilt of 18.4 degrees recurring to the decimal
+     * across separate fires. Repeatable values like that are not movement, they
+     * are a comparison against state that is not current -- and the leading
+     * explanation is that sample delivery stops while the display is off, so
+     * the first sample afterwards is judged against a gravity estimate, a
+     * resting reference and a lastMagnitude describing some earlier moment.
+     *
+     * That hypothesis is untestable from outside the app: attaching adb keeps
+     * the device out of suspend and the symptom disappears entirely. So the gap
+     * is measured in here, where it is visible, and printed on every fire.
+     */
+    private var lastSampleAtMs = 0L
 
     private val motionListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
@@ -168,6 +186,12 @@ class MainActivity : ComponentActivity() {
             val (x, y, z) = event.values
             val mag = sqrt(x * x + y * y + z * z)
             if (mag < 0.001f) return
+
+            // Gap since the previous sample. Recorded before the seed branch
+            // below returns, so a re-seed still leaves a usable timestamp.
+            val sampleAt = SystemClock.elapsedRealtime()
+            val sampleGapMs = if (lastSampleAtMs == 0L) -1L else sampleAt - lastSampleAtMs
+            lastSampleAtMs = sampleAt
 
             // Seed on the first sample rather than treating it as movement.
             if (gx == 0f && gy == 0f && gz == 0f) {
@@ -215,6 +239,10 @@ class MainActivity : ComponentActivity() {
             // Sudden movement, also as a difference and also against the physical
             // constant, for the same reason.
             val jerk = abs(mag - lastMagnitude) / SensorManager.GRAVITY_EARTH
+            // Held for the log below: lastMagnitude is overwritten a few lines
+            // down, well before the fire check, so reading it there would just
+            // echo `mag` and say nothing about the jump that caused the jerk.
+            val prevMag = lastMagnitude
 
             // Say so, once, if this sensor is not reporting 1 g at rest. The bias
             // above was invisible for weeks and cost two rounds of tuning that
@@ -237,8 +265,22 @@ class MainActivity : ComponentActivity() {
                 if (motionHits >= cfg.hits) {
                     motionHits = 0
                     motionWindowStart = now
-                    Log.i(KEY_TAG, "motion: tilt=%.1f° jerk=%.2f (device=%s)"
-                        .format(tiltDeg, jerk, deviceName))
+                    // Log the INPUTS, not just the verdict. tilt and jerk alone
+                    // cannot separate a stale reference from a real movement --
+                    // which was the entire open question on 2026-08-28 -- so
+                    // print the gravity estimate, the resting reference it is
+                    // being measured against, the two magnitudes behind the
+                    // jerk term, and the sample gap. Every one of these is
+                    // needed to read a burst without guessing.
+                    Log.i(
+                        KEY_TAG,
+                        ("motion: tilt=%.1f° jerk=%.2f g=[%.2f %.2f %.2f] " +
+                            "ref=[%.2f %.2f %.2f] mag=%.2f prevMag=%.2f gap=%dms (device=%s)")
+                            .format(
+                                tiltDeg, jerk, gx, gy, gz, refX, refY, refZ,
+                                mag, prevMag, sampleGapMs, deviceName,
+                            ),
+                    )
                     // Adopt the current attitude as we fire. The movement has
                     // been acted on; leaving the old reference in place is what
                     // made the remote fire again on the very same tilt.

@@ -142,8 +142,10 @@ On the remote: **Settings → About → tap Build number 7×**, then
 adb devices        # the remote should be listed
 ```
 
-Optionally switch to wireless adb so the cable isn't needed again. Note this does
-**not** survive a reboot — redo it over USB if the remote restarts:
+Optionally switch to wireless adb so the cable isn't needed again. On its own
+this does **not** survive a reboot — redo it over USB if the remote restarts, or
+install the [boot hook](boot-hook) (see step 5) to make both wireless adb and the
+input bridge come back automatically on every boot:
 
 ```sh
 adb tcpip 5555
@@ -235,9 +237,13 @@ system reports no wake locks held.
 > Setting the home-activity preference reaches the same result, disables
 > nothing, and reverts with one command.
 
-Related: network adb does **not** survive a reboot on this device.
-`adb tcpip 5555` sets only the runtime property, and `persist.adb.tcp.port` is
-ignored by this build, so after every reboot you need USB again. Treat anything
+Related: **network adb can be made to survive a reboot — see
+[`boot-hook/`](boot-hook).** Out of the box it does not: `adb tcpip 5555` sets
+only the runtime property, and `persist.adb.tcp.port` is *ignored by this build*
+because nothing in it restarts adbd on the TCP port at boot — so after every
+reboot you would need USB again. The boot hook does that restart itself (and
+starts the input bridge), so once it is installed, adb-over-TCP comes back on its
+own and you can leave the cable in the drawer. Without it, treat anything
 boot-related as a one-shot test and keep the cable to hand.
 
 #### Prefer to keep the stock launcher?

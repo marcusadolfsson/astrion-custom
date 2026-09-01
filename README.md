@@ -390,6 +390,12 @@ This fork already ships `REMOTE_PATH = "/api/astrion_dashboard"`, so nothing els
 is needed. Editing the layout then requires no adb and no rebuild: edit the YAML,
 press Sync.
 
+> **New to Home Assistant, or curious how this whole setup is built and
+> maintained?** [**USING-CLAUDE-CODE-WITH-HOME-ASSISTANT.md**](USING-CLAUDE-CODE-WITH-HOME-ASSISTANT.md)
+> is a from-zero guide to running Home Assistant with [Claude Code](https://claude.com/claude-code) —
+> the AI assistant these remotes, this component, and the layouts are developed
+> with. It covers both Home Assistant OS and Docker/Core installs.
+
 ---
 
 ## Add a new native card type (the whole point)

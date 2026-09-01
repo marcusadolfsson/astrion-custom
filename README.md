@@ -99,6 +99,7 @@ layout) is unchanged. Each item below landed as its own commit.
 | **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
 | **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, swipe-up info panel, per-remote start page, tilt-based motion wake and dock display |
 | **Voice** | the VOICE key streams the mic to an endpoint you configure; ends on silence |
+| **Input bridge** | screen-off keys via a direct `/dev/input` reader, and a `/system/etc/init` boot hook that starts it (and re-enables adb-TCP) unattended on every boot |
 | **UI** | dark theme so menus and dialogs stop arriving white, press feedback on controls that answer late, transient volume / mute overlay, voice indicator |
 | **Bigger screens** | runs on modern Android and on a tablet from the same APK: `ui.columns` lanes, `ui.scale`, `ui.padding`, landscape lock, a drawn `dpad`, kiosk lock with a PIN-gated exit |
 | **Launchers** | one shared full-screen picker: curated `items:` where each entry names its own service, `target_from:` resolved at tap time so a launcher follows the device you are driving, mixed button/list sections, an A–Z fast-scroller |
@@ -250,63 +251,67 @@ your own hotkey.
 
 <img src="examples/screenshots/09-keymapper-rule.png" width="380" alt="Key Mapper rule">
 
-### 5. Optional: keys that work with the screen off
+### 5. Keys that work with the screen off — the input bridge
 
-By default, the press that wakes the screen is **swallowed** — Android's
-`PhoneWindowManager` consumes it to light the display, and only your *second*
-press does anything. The input bridge fixes that: with it running, the first
-press wakes the screen **and** runs its action.
+This is the fork's most useful hardware fix, and the least obvious. By default
+the press that wakes the screen is **swallowed**: Android's `PhoneWindowManager`
+eats it to light the display, so only your *second* press does anything. On a
+remote that spends its life asleep on a nightstand, every action is two presses.
 
-Start it over adb:
+The **input bridge** fixes it. It reads `/dev/input` directly — below Android's
+dispatch — so the app sees the waking press too: one press wakes the screen
+**and** runs its action. It is strictly additive; the app treats a missing
+bridge as the normal case, and screen-off presses run the *same* handler table
+as screen-on ones, not a parallel map.
+
+The catch is that reading `/dev/input` needs group 1004 (`input`) and an SELinux
+label no app can be granted — so the bridge is **not part of the app**. It is a
+separate `app_process` entry point that must be started by something privileged.
+
+#### Start it at boot, automatically (recommended)
+
+On the HA100 (a `userdebug`, permissive, adb-root build) a small init hook starts
+the bridge — and re-enables adb-over-TCP — on every boot, with no USB and no
+manual step ever again. From [`boot-hook/`](boot-hook):
+
+```sh
+cd boot-hook
+./install.sh <remote-ip> --reboot
+```
+
+It adds one file to `/system/etc/init/` (a `oneshot` service on
+`sys.boot_completed`) plus a payload script in `/data`. Adding a *new* `.rc`
+touches no existing service, so a bad one is skipped by init rather than fatal,
+and recovery is always USB adb + `rm` the file. Full write-up, the manual
+equivalent, and why the persist props alone don't work:
+**[boot-hook/README.md](boot-hook/README.md)**.
+
+#### Or start it by hand
 
 ```sh
 adb shell 'sh /data/user_de/0/com.custom.astrion/start-bridge.sh &'
 ```
 
-The app writes that script itself on every launch, with this install's apk path
-baked in — so the command stays short and constant while the part that actually
-moves is regenerated behind it. (The apk path changes on every reinstall, which
-is why it is not written down anywhere.)
+The app writes that script on every launch with this install's apk path baked
+in, so the command stays short while the moving part is regenerated behind it.
+The swipe-down sheet shows the same command under **Screen-off keys**, with the
+bridge's live `connected` / `not running` state; tap to copy. Drop the `&` to
+watch it — it prints `listening on 127.0.0.1:8098` and logs each client. Stop it
+with `adb shell pkill -f app_process`.
 
-The swipe-down sheet shows the same command under **Screen-off keys**, along
-with whether the bridge is currently `connected` or `not running`. Tap the
-command to copy it.
+Started by hand it does **not** survive a reboot — reading `/dev/input` needs a
+privileged start every time, and on the HA100 network adb doesn't persist a
+reboot either. That is exactly what the boot hook above automates away; without
+it, after each reboot: USB, `adb tcpip 5555`, `adb connect`, then the start
+command (open the app once first if you just reinstalled, so the script exists).
 
-Drop the `&` if you would rather watch it — it prints `listening on
-127.0.0.1:8098` and logs each client as the app attaches, which is reassuring
-the first time.
-
-To stop it: `adb shell pkill -f app_process`
-
-#### Restarting it after a reboot
-
-**The bridge does not survive a reboot, and cannot.** Reading `/dev/input`
-requires group 1004 (`input`) and the `input_device` SELinux label; nothing on
-the device can grant an app either, so it has to be started from a shell every
-time. On the HA100 network adb does not survive a reboot either, so:
-
-```sh
-# 1. plug in USB
-adb tcpip 5555                    # re-enable network adb (runtime only)
-adb connect <remote-ip>:5555      # optional, if you prefer to work wirelessly
-
-# 2. start the bridge
-adb shell 'sh /data/user_de/0/com.custom.astrion/start-bridge.sh &'
-```
-
-Open the app once before step 2 if you have just reinstalled it — the script is
-regenerated on launch, so a fresh install needs one run to write it.
-
-> **Nothing breaks without it.** The feature is strictly additive: the app
-> retries the connection quietly and treats a missing bridge as the normal case,
-> not an error. Screen-off presses run the *same* actions as screen-on ones,
-> because the bridge feeds the same handler table rather than a parallel map.
-
-> **Why not just sign the app as system?** Because it would not work.
+> **Why not just sign the app as system?** It would not work.
 > `sharedUserId=android.uid.system` puts the app in the `system_app` SELinux
 > domain, which is not in group 1004 and has no `input_device` access either —
-> it would install, run as system, and still be denied. An app cannot escalate
-> to fix that: `su` refuses callers that are not already root or shell.
+> it would install, run as system, and still be denied. And an app cannot
+> escalate to fix that: `su` refuses callers that are not already root or shell.
+> The privilege is the wrong shape, not missing — which is why the bridge is a
+> separate process and the boot hook starts it from init, not from the app.
 
 ### 6. Reach system settings without a launcher
 

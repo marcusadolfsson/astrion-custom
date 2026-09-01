@@ -405,6 +405,11 @@ By default the press that wakes the screen is consumed by `PhoneWindowManager`
 and never dispatched, so only the second press does anything. `bridge/` adds an
 optional helper that removes that limitation.
 
+It can be started by hand (below) or, on a `userdebug`/permissive/adb-root build
+like the HA100, **started automatically at every boot** by a one-file init hook
+— see [`boot-hook/`](../boot-hook) in the repo root. The boot hook is the
+recommended way; the rest of this section is how the bridge itself works.
+
 `InputBridge` is an **entry point run as a shell process**, not part of the app's
 runtime:
 
@@ -447,13 +452,18 @@ Platform-signing does **not** solve this: `sharedUserId=android.uid.system` give
 the `system_app` domain, which is also not in group 1004 and also has no
 `input_device` access. And an app cannot escalate to obtain them — AOSP's `su`
 refuses any caller that is not already root or `shell`. Hence a shell-started
-helper, the same approach Shizuku and Key Mapper take.
+helper, the same approach Shizuku and Key Mapper take — and, for unattended
+starts, an init service (`boot-hook/`) that runs it as root at boot rather than
+any attempt to privilege the app.
 
 ### Design notes if you extend it
 
-- **Strictly additive.** The bridge cannot survive a reboot, so it is absent more
-  often than present. The client retries quietly and logs at debug; a missing
-  bridge is the normal case, not a fault. Never make anything depend on it.
+- **Strictly additive — keep it that way even though it now persists.** The
+  bridge *can* be made to survive a reboot (the `boot-hook/` init service), but
+  it is still started by something outside the app and can be absent — not
+  installed, killed, a fresh flash. The client retries quietly and logs at debug;
+  a missing bridge is the normal case, not a fault. Never make anything depend on
+  it.
 - **The struct is 16 bytes on 32-bit ARM** (two 4-byte `timeval` fields), 24 on
   64-bit. Get this wrong and you get plausible-looking garbage codes rather than
   an error.

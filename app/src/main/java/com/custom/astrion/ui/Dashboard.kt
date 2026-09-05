@@ -276,7 +276,14 @@ fun Dashboard(
         Column(modifier = Modifier.fillMaxSize().padding(config.ui.padding.dp)) {
             // Above the banners on purpose: the clock and battery should hold
             // the same spot whether or not a connection banner is showing.
-            StatusBar(onSwipeDown = config.gestures?.swipeDown?.let { { onSettingsOpen(true) } })
+            // One clock setting, not two. `screensaver.clock_24h` already exists and
+            // is per-device; the status bar had an is24Hour parameter that nothing
+            // ever passed, so it stayed 12-hour while the idle clock went 24-hour
+            // and the same remote showed both formats.
+            StatusBar(
+                onSwipeDown = config.gestures?.swipeDown?.let { { onSettingsOpen(true) } },
+                is24Hour = config.screensaver.forDevice(deviceName).clock24h,
+            )
             ConnectionBanner(connection)
             if (configNotice != null) ConfigNoticeBanner(configNotice)
 

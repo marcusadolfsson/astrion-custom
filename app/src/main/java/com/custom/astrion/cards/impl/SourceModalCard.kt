@@ -256,7 +256,19 @@ class SourceModalCard : CardRenderer {
         // is tracked outside composition -- see SourceModalShown.
         val openWhen = config.string("open_when")
         if (openWhen != null && e?.state == openWhen && entries.isNotEmpty()) {
-            val stamp = e.lastChanged ?: e.state
+            // Identity comes from the RESULT SET, not from lastChanged.
+            //
+            // lastChanged only moves on a STATE change, and HA's compressed
+            // state diff omits `lc` when only attributes change -- so a second
+            // search arriving while the picker is already `on` carried the
+            // identical stamp, claim() returned false, and the list never
+            // opened. Reported as "it said it found three matches but never
+            // showed the list".
+            //
+            // The entries ARE the thing being shown, so hashing them is the
+            // honest identity: a genuinely new result set always differs, and
+            // re-rendering the same set never reopens a modal the user dismissed.
+            val stamp = entries.joinToString("\u0000") { it.name }.hashCode().toString()
             LaunchedEffect(stamp) {
                 if (SourceModalShown.claim(entityId, stamp)) open = true
             }

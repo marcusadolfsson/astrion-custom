@@ -281,7 +281,13 @@ class MediaPlayerCard : CardRenderer {
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            LauncherButton(config.options["launcher"] as? Map<String, Any?>, ctx)
+            // Sizeable so the dock can run a bigger target than the in-hand
+            // page: same row, but read and pressed from across a room.
+            LauncherButton(
+                config.options["launcher"] as? Map<String, Any?>,
+                ctx,
+                size = config.int("button_size", 44).dp,
+            )
         }
     }
 
@@ -517,7 +523,7 @@ class MediaPlayerCard : CardRenderer {
         // repaints once that device reports back, which is a beat later than the
         // press. It is the same "did that register" gap the shades have, just
         // shorter -- and pressing play twice is worse than pressing it late.
-        val (press, click) = rememberPressFeedback(onClick)
+        val (press, click) = rememberPressFeedback(onClick = onClick)
         Box(
             modifier = Modifier
                 .size(size)

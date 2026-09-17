@@ -187,6 +187,22 @@ data class MotionWakeConfig(
      * difference, so a constant sensor bias cancels.
      */
     val jerkRatio: Float = 0.25f,
+    /**
+     * Baseline-relative plausibility band. A raw sample is discarded as a
+     * sensor artefact, before it touches any state, when its magnitude falls
+     * outside [implausibleLowRatio]..[implausibleHighRatio] times this device's
+     * OWN resting |a| -- not times g -- so a biased sensor is judged against
+     * itself.
+     *
+     * Two real faults on these remotes, one per side. master_1 intermittently
+     * reports ~1.46 m/s^2 (low); master_2 alternates in ~22.45 m/s^2 spikes
+     * (~2.3 g, high) that read as jerk on every sample and woke it all night.
+     * A gentle pick-up is a TILT near 1 g and passes the band; only a hard
+     * deliberate shake approaches the high edge, so the primary tilt path still
+     * wakes the faulty unit.
+     */
+    val implausibleLowRatio: Float = 0.5f,
+    val implausibleHighRatio: Float = 1.8f,
     /** Samples that must qualify before the screen lights. */
     val hits: Int = 2,
     /** Ignore motion for this long after the display turns off. */
@@ -461,6 +477,17 @@ data class OverlayConfig(
 data class PageConfig(
     val name: String,
     val cards: List<CardConfig>,
+    /**
+     * Alternate card list shown while the remote is ON POWER (docked).
+     *
+     * Empty means "no dock view" -- the page renders [cards] as usual, so every
+     * existing page is unaffected. This is a per-PAGE list rather than a separate
+     * dock page on purpose: the pager is untouched, so swiping left/right still
+     * changes room exactly as it does in the hand, and `startPage` stays a stable
+     * index. A dock page appended or removed with power would make pageCount
+     * dynamic, and mb-a/mb-b both depend on `startPage: 1` meaning Master Bedroom.
+     */
+    val dockCards: List<CardConfig> = emptyList(),
     /** Page-scoped short-press bindings; override the global list per key. */
     val hotkeys: List<HotkeyConfig> = emptyList(),
     /** Page-scoped long-press bindings; override the global list per key. */

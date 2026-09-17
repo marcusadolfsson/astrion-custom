@@ -152,6 +152,8 @@ object DashboardLoader {
                     PageConfig(
                         name = name,
                         cards = cards,
+                        dockCards = (obj["dock_cards"] as? JsonArray)
+                            ?.map { parseCard(it as JsonObject) } ?: emptyList(),
                         // parseHotkey is reused verbatim, so a page-scoped binding
                         // supports `quiet` for free.
                         hotkeys = (obj["hotkeys"] as? JsonArray)

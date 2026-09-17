@@ -137,7 +137,7 @@ class ButtonGridCard : CardRenderer {
         // Same latched feedback as the shade buttons. It matters here too: the
         // Lutron scene buttons and the bed presets both take a moment to report
         // back, and `active` only lights up once the tracker catches up.
-        val (press, click) = rememberPressFeedback(onClick)
+        val (press, click) = rememberPressFeedback(onClick = onClick)
 
         var box = modifier
             .height(height)

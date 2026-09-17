@@ -26,6 +26,12 @@ object EntityRefs {
         val out = sortedSetOf<String>()
         config.pages.forEach { page ->
             page.cards.forEach { card -> walk(card.options, out) }
+            // dock_cards too. Missing these meant an entity referenced ONLY by a
+            // dock menu was never subscribed, so its tile silently fell back to
+            // the menu name -- and it hid, because entities that ALSO appear on
+            // the in-hand page (climate.living_room) worked fine while ones that
+            // do not (climate.new_master) did not.
+            page.dockCards.forEach { card -> walk(card.options, out) }
         }
         // The overlay reads these outside any card, so collect them explicitly —
         // otherwise the filtered subscription would never deliver their updates.

@@ -64,7 +64,29 @@ class ButtonPressState(
  * visual (scale, colour), and pass the returned lambda to `clickable`.
  */
 @Composable
-fun rememberPressFeedback(onClick: () -> Unit): Pair<ButtonPressState, () -> Unit> {
+fun rememberPressFeedback(
+    /**
+     * False for controls whose result is IMMEDIATE -- navigation, above all.
+     *
+     * The latch exists because a shade answers in 5-10 seconds and a 200ms
+     * ripple cannot say "taken" across that gap. A Back button has no such gap:
+     * the screen has already changed by the time the finger leaves. Latching
+     * there holds a highlight on a control that has finished, and since the back
+     * pill is the SAME composable at every level, the ack outlives the page that
+     * started it and arrives greyed on the next one.
+     *
+     * Press-down feedback still applies either way -- it follows the finger, so
+     * the button reacts on touch. Only the after-the-fact hold is dropped.
+     *
+     * Declared FIRST so that `rememberPressFeedback { ... }` still works: a
+     * trailing lambda binds to the LAST parameter, so putting the flag there
+     * would have every existing trailing-lambda call site hand its lambda to a
+     * Boolean. The cost is that the handful of `rememberPressFeedback(onClick)`
+     * calls have to name the argument.
+     */
+    latch: Boolean = true,
+    onClick: () -> Unit,
+): Pair<ButtonPressState, () -> Unit> {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     var acked by remember { mutableStateOf(false) }
@@ -73,8 +95,8 @@ fun rememberPressFeedback(onClick: () -> Unit): Pair<ButtonPressState, () -> Uni
     // Keyed on a counter, not on `acked`: a second tap during the window has to
     // RESTART the timer, and keying on the boolean would leave the first
     // effect's delay running and cut the second acknowledgement short.
-    LaunchedEffect(tick) {
-        if (tick == 0) return@LaunchedEffect
+    LaunchedEffect(tick, latch) {
+        if (tick == 0 || !latch) return@LaunchedEffect
         acked = true
         delay(PressFeedback.ACK_MS)
         acked = false

@@ -137,7 +137,7 @@ fun LockKeypad(
 
 @Composable
 private fun Key(label: String, onClick: () -> Unit) {
-    val (press, click) = rememberPressFeedback(onClick)
+    val (press, click) = rememberPressFeedback(onClick = onClick)
     Box(
         modifier = Modifier
             .size(64.dp)

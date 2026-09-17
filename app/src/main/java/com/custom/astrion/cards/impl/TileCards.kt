@@ -223,7 +223,7 @@ private fun CircleBtn(
     // it: a speed step goes out over LocalTuya and the percentage on the tile
     // only moves once the fan reports back, so the button sits there looking
     // untouched for about a second.
-    val (press, click) = rememberPressFeedback(onClick)
+    val (press, click) = rememberPressFeedback(onClick = onClick)
     Box(
         modifier = Modifier
             .size(46.dp)

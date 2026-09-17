@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -93,10 +94,17 @@ fun StatusBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            // Mirror of the bottom bar's swipe-up: drag down on this strip to
-            // reach whatever `gestures.swipe_down` points at. The stock
-            // launcher used to own a swipe-down panel here, so the muscle
-            // memory already exists.
+            // The ONLY gesture route to the device panel: drag down on this
+            // strip to reach whatever `gestures.swipe_down` points at. The
+            // stock launcher used to own a swipe-down panel here, so the muscle
+            // memory already exists. The bottom bar's old swipe-up is gone --
+            // it vanished inside a dock submenu and fought Android's
+            // swipe-up-to-home on any device with a gesture strip.
+            //
+            // The band is given a thumb-sized minimum height below. The drawn
+            // content is one 15sp line, which is far too thin to START a drag
+            // in; the gesture needs somewhere to land, not just somewhere to
+            // finish.
             .pointerInput(onSwipeDown) {
                 if (onSwipeDown != null) {
                     detectVerticalDragGestures { change, dragAmount ->
@@ -110,6 +118,7 @@ fun StatusBar(
             // Asymmetric on purpose: a little air above so the readouts clear
             // the screen edge, and less below so they sit close to the content
             // they label rather than floating between the two.
+            .heightIn(min = 46.dp)
             .padding(start = 14.dp, end = 14.dp, top = 9.dp, bottom = 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,

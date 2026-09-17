@@ -163,7 +163,7 @@ class ShadeControlCard : CardRenderer {
         // clearest case for it in the whole dashboard: Bond is RF one-way, so
         // nothing on screen changes for 5-10 s after a press, and a 200 ms
         // ripple on a 3" panel is why the same button gets pressed three times.
-        val (press, click) = rememberPressFeedback(onClick)
+        val (press, click) = rememberPressFeedback(onClick = onClick)
         Box(
             modifier = Modifier
                 .size(46.dp)

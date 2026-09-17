@@ -2,6 +2,7 @@ package com.custom.astrion.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -11,6 +12,9 @@ import androidx.compose.foundation.clickable
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +26,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.foundation.lazy.LazyColumn
@@ -51,12 +56,16 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -81,6 +90,7 @@ import com.custom.astrion.ha.EntityMap
 import com.custom.astrion.ha.EntityState
 import com.custom.astrion.ha.HaClient
 import com.custom.astrion.input.HardwareKey
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /**
@@ -113,6 +123,8 @@ fun Dashboard(
     onVoiceDismiss: () -> Unit = {},
     /** The page the pager has SETTLED on; MainActivity uses it to scope hotkeys. */
     onPageChange: (Int) -> Unit = {},
+    /** True while the remote is on power; pages with `dock_cards` swap to them. */
+    docked: Boolean = false,
     /** Swipe-up panel visibility, owned by MainActivity (see the note below). */
     settingsOpen: Boolean = false,
     onSettingsOpen: (Boolean) -> Unit = {},
@@ -217,7 +229,14 @@ fun Dashboard(
     // lambda (the same idiom as openTargetState below).
     val onPageChangeState = rememberUpdatedState(onPageChange)
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.settledPage }.collect { onPageChangeState.value(it) }
+        snapshotFlow { pagerState.settledPage }.collect {
+            // Swiping to another room lands on THAT room's top-level grid. Both
+            // room cards read the same key, so one write resets both -- and it
+            // stops the dots from staying hidden because the page you left had
+            // a submenu open.
+            com.custom.astrion.cards.impl.DockMenuState.path = emptyList()
+            onPageChangeState.value(it)
+        }
     }
 
     // Overlay visibility is HOISTED to MainActivity, not remembered here.
@@ -289,6 +308,15 @@ fun Dashboard(
 
             HorizontalPager(
                 state = pagerState,
+                // Room-swiping is an INDEX gesture only. Inside a dock submenu a
+                // horizontal drag means "go back a level", and the two were
+                // fighting: the pager is an ancestor of the card, and
+                // Modifier.draggable does NOT participate in nested scroll (only
+                // `scrollable` does), so the pager kept winning the gesture --
+                // which both swallowed the back-swipe and let you slide into
+                // another room mid-menu. Switching the pager off while a submenu
+                // is open hands the drag to the card cleanly and fixes both.
+                userScrollEnabled = !com.custom.astrion.cards.impl.DockMenuState.inSubmenu,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
@@ -300,16 +328,23 @@ fun Dashboard(
                     ctx,
                     if (pageIndex == pagerState.currentPage) scrollTarget else null,
                     onScrollHandled,
+                    docked = docked,
                     columns = config.ui.columns,
                 )
             }
 
-            PageIndicator(
-                pages = config.pages,
-                current = pagerState.currentPage,
-                onDotClick = { i -> scope.launch { pagerState.animateScrollToPage(i) } },
-                onSwipeUp = { onSettingsOpen(true) },
-            )
+            // The dots ARE the room selector, so they are hidden while a dock
+            // submenu is open: that strip is the row a submenu needs for its
+            // sixth button, and picking a room is not what you are doing
+            // mid-submenu. The top-level dock grid keeps them.
+            if (!com.custom.astrion.cards.impl.DockMenuState.inSubmenu) {
+                PageIndicator(
+                    pages = config.pages,
+                    current = pagerState.currentPage,
+                    onDotClick = { i -> scope.launch { pagerState.animateScrollToPage(i) } },
+                    onOpenPanel = { onSettingsOpen(true) },
+                )
+            }
         }
 
         // Page-effective, for the same reason the voice config below is: the
@@ -631,11 +666,6 @@ private fun SettingsSheet(
                 .padding(horizontal = 22.dp, vertical = 18.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // Grab handle. The drag detector lives HERE and not on the Column,
-            // because the Column is verticalScroll -- a pointerInput on it would
-            // either swallow the scroll or never fire. A dedicated handle also
-            // advertises the gesture instead of hiding it.
-            GrabHandle(onSwipeDown = onDismiss)
             Text(panel.title, color = Color(0xFFF1F4FA), fontSize = 20.sp, fontWeight = FontWeight.Bold)
             statusTitle?.let { title ->
                 Text(
@@ -757,6 +787,15 @@ private fun SettingsSheet(
                 if (kiosk) SheetButton("Exit kiosk", onKioskExit)
                 SheetButton("Close", onDismiss)
             }
+
+            // Handle at the BOTTOM, closing on an upward drag, to match the
+            // Status view -- and because this panel hangs from the top edge and
+            // is pulled DOWN to open. Closing it with a second downward pull was
+            // asking the same gesture to mean both "open this" and "put it
+            // away". The detector lives on the handle and not on the Column
+            // because the Column is verticalScroll: a pointerInput there would
+            // either swallow the scroll or never fire.
+            GrabHandle(onClose = onDismiss, up = true)
         }
     }
 }
@@ -816,11 +855,34 @@ private fun PageContent(
     scrollTarget: String? = null,
     onScrollHandled: () -> Unit = {},
     columns: Int = 1,
+    docked: Boolean = false,
 ) {
+    // A page with `dock_cards` renders those, ON OR OFF the charger.
+    //
+    // This started as a cradle-only view -- hence the name -- on the assumption
+    // that a remote in the hand wants a dense scrolling list and a remote across
+    // the room wants six big targets. In use the big targets won in both cases,
+    // so the power state no longer chooses; `docked` is still threaded through
+    // for the screensaver and is deliberately NOT consulted here.
+    //
+    // NOTE: this makes a page's ORIGINAL `cards:` list unreachable wherever
+    // `dock_cards` exists. That is the intent, not an oversight -- but it means
+    // anything still only present in the old list is now gone from that page,
+    // so removing a control from `dock_cards` removes it outright.
+    //
+    // Falling back to the normal list when `dock_cards` is empty is what keeps
+    // every other page working untouched.
+    val shownAll = if (page.dockCards.isNotEmpty()) page.dockCards else page.cards
+    // `dock_index_only` cards (the now-playing row) belong to the dock INDEX.
+    // A submenu needs that height for its own sixth button; with the row left in
+    // place a six-item menu overflows the screen.
+    val shown = if (com.custom.astrion.cards.impl.DockMenuState.inSubmenu) {
+        shownAll.filter { it.options["dock_index_only"] != true }
+    } else shownAll
     // Cards with options["pin"] == "bottom" float at the bottom, always visible;
     // the rest scroll above them.
-    val pinned = remember(page) { page.cards.filter { it.options["pin"] == "bottom" } }
-    val scrolling = remember(page) { page.cards.filter { it.options["pin"] != "bottom" } }
+    val pinned = remember(shown) { shown.filter { it.options["pin"] == "bottom" } }
+    val scrolling = remember(shown) { shown.filter { it.options["pin"] != "bottom" } }
 
     // Only lay out cards that will actually draw something. A hidden
     // `conditional` still occupies a slot, and the spacing puts a gap around
@@ -830,6 +892,17 @@ private fun PageContent(
     // the gap as well as the content.
     val visible = scrolling.filter {
         it.type != "conditional" || ConditionalCard.matches(it, ctx)
+    }
+    // Same pipeline again for the level a back-swipe is heading TO. It can
+    // differ from the live list by more than the menu drawn inside the card:
+    // popping to the index brings the `dock_index_only` now-playing row back,
+    // so reusing `visible` for the layer underneath would reveal a page missing
+    // a row that reappears the instant the gesture completes.
+    val underVisible = run {
+        val parentInSub = com.custom.astrion.cards.impl.DockMenuState.path.size > 1
+        (if (parentInSub) shownAll.filter { it.options["dock_index_only"] != true } else shownAll)
+            .filter { it.options["pin"] != "bottom" }
+            .filter { it.type != "conditional" || ConditionalCard.matches(it, ctx) }
     }
     fun separatorIndex(name: String) = visible.indexOfFirst {
         it.type == "separator" &&
@@ -909,17 +982,155 @@ private fun PageContent(
                 }
             }
         } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+            // Follows the finger during a dock back-swipe, and springs back if the
+            // gesture is abandoned. Without it the page simply jumped, which reads
+            // as a glitch rather than as a gesture that was understood.
+            // A PLAIN float during the drag, not an Animatable.
+            //
+            // Every move event was doing `scope.launch { snapTo() }` -- a
+            // coroutine dispatch per touch sample -- which is why this stuttered
+            // while the pager (which writes its offset directly) stayed smooth.
+            // Writing snapshot state costs nothing; the coroutine is only needed
+            // for the release animation.
+            var swipePx by remember { mutableFloatStateOf(0f) }
+            var boxW by remember { mutableFloatStateOf(0f) }
+            val swipeScope = rememberCoroutineScope()
+            val underState = rememberLazyListState()
+            // The detector and the thing that MOVES are deliberately two
+            // different nodes, and that is the whole fix for the shaking.
+            //
+            // With `offset` and `pointerInput` on one node, pointer positions
+            // are reported relative to the node's PLACED position -- so moving
+            // it by the drag changed the coordinate space the drag was being
+            // measured in. Every frame fed its own output back in as input:
+            // offset right 10px, next sample reads 10px less travel, offset
+            // shrinks, and it oscillates. That is the vibration, and no amount
+            // of smoothing the write path could fix it because the measurement
+            // itself was wrong.
+            //
+            // The Box stays put and does the measuring; only the list inside it
+            // moves.
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .onSizeChanged { boxW = it.width.toFloat() }
+                    // Dock back-swipe, detected ABOVE the list rather than inside
+                    // the card.
+                    //
+                    // Inside it the gesture was cancelled the moment a finger
+                    // actually moved: this LazyColumn claims the pointer (an
+                    // arcing thumb gives it a vertical component to grab) and the
+                    // child's detector dies with it -- the logs showed taps being
+                    // reported and every real drag vanishing. Here the handler is
+                    // the list's PARENT, so the Initial pass reaches it first and
+                    // consuming stops the list from scrolling the page away under
+                    // the gesture.
+                    .pointerInput(Unit) {
+                        val slop = viewConfiguration.touchSlop
+                        val commit = 40.dp.toPx()
+                        awaitEachGesture {
+                            val down = awaitFirstDown(
+                                requireUnconsumed = false,
+                                pass = PointerEventPass.Initial,
+                            )
+                            if (!com.custom.astrion.cards.impl.DockMenuState.inSubmenu) return@awaitEachGesture
+                            var dx = 0f
+                            var claimed = false
+                            while (true) {
+                                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!ch.pressed) break
+                                dx = ch.position.x - down.position.x
+                                if (!claimed && dx > slop) claimed = true
+                                if (claimed) {
+                                    ch.consume()
+                                    swipePx = dx.coerceAtLeast(0f)
+                                }
+                            }
+                            android.util.Log.i(
+                                "AstrionKeys",
+                                "page swipe: dx=%.0f claimed=%b commit=%b".format(dx, claimed, dx > commit),
+                            )
+                            if (claimed && dx > commit) {
+                                // Carry the page the rest of the way OUT before
+                                // swapping levels, rather than popping under the
+                                // finger and letting the offset vanish -- that read
+                                // as the content blinking away mid-gesture. Pop at
+                                // the end, then snap back to zero so the level
+                                // underneath appears in place rather than sliding
+                                // in from the old offset.
+                                val w = size.width.toFloat()
+                                swipeScope.launch {
+                                    animate(swipePx, w, animationSpec = tween(160)) { v, _ ->
+                                        swipePx = v
+                                    }
+                                    com.custom.astrion.cards.impl.DockMenuState.popOne()
+                                    swipePx = 0f
+                                }
+                            } else if (claimed) {
+                                swipeScope.launch {
+                                    animate(swipePx, 0f) { v, _ -> swipePx = v }
+                                }
+                            }
+                        }
+                    },
             ) {
-                // Index keys: the card list only changes when the layout syncs,
-                // and they keep LazyColumn reusing slots instead of re-composing
-                // on the list's identity.
-                items(visible.size, key = { it }) { i ->
-                    RenderCard(visible[i], ctx)
+                // The level being swiped BACK to, drawn underneath and revealed
+                // as the current one slides away. Without it the page moved off
+                // over bare background and the destination only appeared once
+                // the gesture had finished, which reads as a cut rather than a
+                // drag: you are pulling one thing aside, so there has to be
+                // something behind it.
+                //
+                // It trails at a quarter of the finger's travel -- the shallow
+                // parallax that makes the two layers read as depth instead of
+                // as two pages sliding in lockstep. At full travel it is exactly
+                // at rest, so the swap at the end of the animation moves nothing.
+                if (swipePx > 0f && com.custom.astrion.cards.impl.DockMenuState.inSubmenu) {
+                    CompositionLocalProvider(
+                        com.custom.astrion.cards.impl.LocalDockPath provides
+                            com.custom.astrion.cards.impl.DockMenuState.path.dropLast(1)
+                    ) {
+                        LazyColumn(
+                            state = underState,
+                            // Inert: it is a preview of a level you have not
+                            // arrived at, and a scroll landing here would leave
+                            // the real list somewhere else once you did.
+                            userScrollEnabled = false,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .offset {
+                                    IntOffset(((swipePx - boxW) * 0.25f).roundToInt(), 0)
+                                },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(underVisible.size, key = { it }) { i ->
+                                RenderCard(underVisible[i], ctx)
+                            }
+                        }
+                    }
+                }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .offset { IntOffset(swipePx.roundToInt(), 0) }
+                        // Opaque, now that something is drawn behind it. A
+                        // transparent sliding layer would show the destination
+                        // THROUGH itself and the two levels would read as one
+                        // double-exposed page.
+                        .background(Color(0xFF0E2229)),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    // Index keys: the card list only changes when the layout
+                    // syncs, and they keep LazyColumn reusing slots instead of
+                    // re-composing on the list's identity.
+                    items(visible.size, key = { it }) { i ->
+                        RenderCard(visible[i], ctx)
+                    }
                 }
             }
         }
@@ -1005,20 +1216,17 @@ private fun PageIndicator(
     pages: List<PageConfig>,
     current: Int,
     onDotClick: (Int) -> Unit,
-    onSwipeUp: () -> Unit = {},
+    onOpenPanel: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            // Swipe up anywhere along the bottom bar to open the info/sync panel.
-            .pointerInput(Unit) {
-                detectVerticalDragGestures { change, dragAmount ->
-                    if (dragAmount < -6f) {
-                        change.consume()
-                        onSwipeUp()
-                    }
-                }
-            }
+            // The device panel used to open from HERE, on a swipe up. It now
+            // opens only from a swipe DOWN on the status bar. One gesture, one
+            // edge: the bottom bar is also the row that disappears inside a dock
+            // submenu, which made the panel unreachable exactly where you might
+            // want it, and it shares pixels with Android's swipe-up-to-home on
+            // any device that has one.
             // Keep clear of the system's gesture strip. Two reasons, and the
             // second is the important one:
             //  - the gesture handle DRAWS over this bar on a device that has one
@@ -1029,18 +1237,16 @@ private fun PageIndicator(
             //    with Android's swipe-up-to-home, and the system wins.
             // The HA100 has neither, so this measures 0 there and nothing moves.
             .windowInsetsPadding(WindowInsets.systemGestures.only(WindowInsetsSides.Bottom))
-            // A real target, not just the dots. Content height here is ~19dp,
-            // and under a ui.scale below 1 that lands around 30 physical px --
-            // a strip you cannot reliably hit, let alone start a drag in. The
-            // gesture is the only route to the device panel, so it gets a
-            // thumb-sized band whether or not anything is drawn in it.
-            .heightIn(min = 48.dp)
+            // 48dp here used to buy somewhere to START the swipe-up drag.
+            // That gesture has moved to the status bar, which now carries the
+            // thumb-sized band instead, so this shrinks by roughly what the top
+            // grew by and the cards keep the same room. What is left only has
+            // to be tappable, and the page label brings its own padding.
+            .heightIn(min = 34.dp)
             .padding(top = 4.dp, bottom = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // No grab-handle affordance: the swipe-up gesture still works anywhere
-        // along this bar, it just isn't advertised.
         Row(verticalAlignment = Alignment.CenterVertically) {
             pages.forEachIndexed { i, _ ->
                 val active = i == current
@@ -1054,12 +1260,10 @@ private fun PageIndicator(
                 )
             }
             Spacer(Modifier.width(10.dp))
-            // Tapping the page name opens the device panel, same as swiping up.
-            // The swipe is a drag in a thin band at the very bottom edge and is
-            // genuinely hard to land on a 10" screen -- and it is the ONLY route
-            // to the panel, which is now also the only route out of the kiosk.
-            // A gesture that is occasionally unreachable is not acceptable for
-            // the exit hatch, so it gets a plain tap target as well. The dots
+            // Tapping the page name opens the device panel. This is NOT
+            // redundant with the swipe-down on the status bar: the panel is the
+            // only route out of the kiosk, and an exit hatch that depends on
+            // landing a drag in a thin edge band is not an exit hatch. The dots
             // keep their own job (switching pages); only the label does this.
             Text(
                 pages.getOrNull(current)?.name ?: "",
@@ -1068,7 +1272,7 @@ private fun PageIndicator(
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable { onSwipeUp() }
+                    .clickable { onOpenPanel() }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
@@ -1157,16 +1361,23 @@ private fun UnknownCard(type: String) {
  * the same.
  */
 @Composable
-private fun GrabHandle(onSwipeDown: () -> Unit) {
+private fun GrabHandle(onClose: () -> Unit, up: Boolean = false) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 4.dp)
-            .pointerInput(onSwipeDown) {
+            // A band, not just the 4dp bar that is drawn. The pill is an
+            // affordance; the thing you actually have to hit is this.
+            .heightIn(min = 34.dp)
+            .then(if (up) Modifier.padding(top = 4.dp) else Modifier.padding(bottom = 4.dp))
+            .pointerInput(onClose, up) {
                 detectVerticalDragGestures { change, drag ->
-                    if (drag > 6f) {
+                    // A sheet leaves the way it arrived. The device panel hangs
+                    // from the top edge and is pulled down to open, so it is
+                    // pushed back up to close; anything anchored the other way
+                    // keeps the downward gesture.
+                    if (if (up) drag < -6f else drag > 6f) {
                         change.consume()
-                        onSwipeDown()
+                        onClose()
                     }
                 }
             },
@@ -1207,7 +1418,6 @@ private fun StatusSheet(
                 .fillMaxSize()
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
-            GrabHandle(onSwipeDown = onDismiss)
             Text(
                 title,
                 color = Color(0xFFF1F4FA),
@@ -1215,12 +1425,21 @@ private fun StatusSheet(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
             )
+            // weight, not fillMaxSize: the list has to leave the handle below it
+            // its row. fillMaxSize would claim the whole column and push the
+            // handle off the bottom of the screen -- present in the tree,
+            // invisible and unreachable, which is the worst of both.
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(cards) { card -> RenderCard(card, ctx) }
             }
+            // The gesture lives on the handle rather than on the whole page
+            // BECAUSE of that list: a swipe-up anywhere would be indistinguishable
+            // from scrolling down through the readouts, and this view is mostly
+            // list. One unambiguous strip at the bottom instead.
+            GrabHandle(onClose = onDismiss, up = true)
         }
     }
 }

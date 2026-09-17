@@ -165,6 +165,84 @@ honest outcome for a resume that failed.
 > scheduled setpoint is copied from one by definition and a held one is a number
 > somebody dialled in.
 
+### `dock_menu`
+
+A 2-wide grid of large buttons, each opening a submenu of equally large buttons. Built
+for a remote sitting in its cradle across the room, where a dense scrolling list is
+unusable -- but it turned out to win in the hand too, so it is simply the view now.
+
+It is enabled by a second card list on a page, **not** by a page of its own:
+
+```yaml
+- name: Living Room
+  cards: [...]        # unreachable while dock_cards exists
+  dock_cards:
+  - type: dock_menu
+    options:
+      columns: 2
+      button_height: 154
+      menus:
+      - name: Lights
+        icon: light
+        close_on_select: true
+        status_entity: input_select.lr_lighting_scene
+        items:
+        - {name: Bright, icon: bright, service: script.lights_bright}
+        - {name: 'Off', icon: power, service: script.lights_off}
+```
+
+Why a second list rather than a page: `startPage` is a positional index into `pages:`,
+so adding a page silently moves every remote whose `startPage` pointed past it. The
+cost is that a page's original `cards:` is unreachable wherever `dock_cards` exists --
+which means removing a control from `dock_cards` removes it outright.
+
+**Tiles show live state.** The menu name sits in a small letter-spaced caption and the
+status takes the main line. That split is what allows "Off" to be shown at all: with
+one line it read as the tile's name, so it was suppressed, and any menu whose thing was
+off rendered as a bare unlabelled icon.
+
+| Menu option | Meaning |
+|---|---|
+| `status_entity` / `status_format` / `status_attribute` | The live value on the tile's main line. `status_format` composes placeholders (`{state}`, or any attribute name); if ANY placeholder is missing the whole label resolves to null, so a half-built string never reaches a tile. |
+| `status_big` | Large value BESIDE the icon rather than under it. Suppresses the caption -- a tile already showing two numbers does not need naming. |
+| `status_pills` | Outlined pills under the icon row; `color: heat` for the warm one. |
+| `index_status` | Same keys again, read only by the index tile, for a menu whose `status_entity` means something else. Shades needs it: that field is the shade *target*, which drives the submenu's nested tile and its selection highlight, while the index wants to know whether the shades are open. |
+| `show_status: false` | Keep the NAME on the index and still use `status_entity` for the submenu. |
+| `close_on_select` | Pop a level after a choice. Right for pick-one menus; wrong for shades, where Stop follows Open. |
+| `corner: true` | Lift an item into the back row beside the lock -- things that *qualify* the menu rather than being one of its choices. |
+| `visible_when` | `{entity_id, state}`, filtered before chunking so the grid closes up instead of leaving a hole. |
+| `lock` | `{entity, pin_entry, pin_entity}` -- red pill and a PIN pad. Home Assistant does the comparing, so the remote never stores the secret. |
+| `card` | Render a normal card instead of a grid. The thermostat embeds `bubble_climate` with `inline: true`, because fixed rungs cannot express a setpoint between them, or two bounds at all. |
+
+**Swipe right to go back**, with the destination level revealed behind the one sliding
+away. Four traps, each of which cost an evening:
+
+- **The gesture cannot be detected inside the card.** The card sits in a `LazyColumn`,
+  which claims the pointer the instant a real thumb moves -- a thumb arcs, so the list
+  gets a vertical component to grab, and the child's gesture coroutine is cancelled.
+  Detection has to live above the list. Note that `adb input swipe` is dead-straight
+  and therefore passes every time while a finger fails: this is only reproducible by
+  hand.
+- **`offset` and `pointerInput` must be on different nodes.** Pointer positions are
+  reported relative to a node's *placed* position, so a node that moves with the drag
+  is measuring the drag in a coordinate space the drag is changing. Each frame feeds
+  its own output back in as input and the page visibly vibrates.
+- **The destination level cannot come from the shared nav state**, because the pop has
+  not happened yet -- reading it draws the same level twice and slides a page off over
+  bare background. A composition local overrides the path for the preview layer only;
+  taps still write the real one, so a preview can never navigate.
+- **Never latch the press acknowledgement on a navigating control**
+  (`rememberPressFeedback(latch = false, ...)`). The latch exists for controls that
+  answer seconds later; navigation has already redrawn. Because the Back pill is the
+  same composable at every level, its acknowledgement outlived the page that started it
+  and arrived greyed on the next one.
+
+One more, in `EntityRefs`: entities referenced **only** by dock menus must be walked
+explicitly, or the app never subscribes to them. The symptom is a tile showing its menu
+name where a temperature belongs, which looks like a formatting bug.
+
+---
+
 ### `conditional`
 
 A wrapper that renders its child `card` (or `cards`) only while an entity
@@ -728,10 +806,21 @@ The layout can be fetched from Home Assistant instead of living only at
 - Invalid JSON is rejected and the cache kept, so a bad edit can't brick the
   remote.
 
-### Swipe-up info panel
+### Device panel (swipe DOWN from the status bar)
 
-Swiping up from the bottom bar opens a panel showing the build number, the live HA
-URL, a **Sync dashboard** button, and a toggle for the setup server.
+Dragging down on the status bar opens a panel showing the build number, the live HA
+URL, a **Sync dashboard** button, and a toggle for the setup server. Tapping the page
+name at the bottom opens the same panel.
+
+It used to be a swipe UP from the bottom bar. Two reasons it moved. The bottom bar is
+hidden while a dock submenu is open, so the panel became unreachable exactly where you
+might want it; and on any device with a gesture strip that band is shared with
+Android's own swipe-up-to-home, which wins. The tap target on the page name stayed,
+because the panel is the only way out of kiosk mode and an exit hatch that depends on
+landing a drag in a thin edge band is not an exit hatch.
+
+Both sheets hang from the top edge, so both close with an upward drag on a handle at
+their **bottom**. A sheet leaves the way it arrived.
 
 ---
 

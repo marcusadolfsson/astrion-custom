@@ -1,6 +1,7 @@
 package com.custom.astrion.cards.impl
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -114,6 +115,8 @@ class BubbleClimateCard : CardRenderer {
         val e = ctx.entities[entityId]
         val step = (config.options["step"] as? Number)?.toDouble() ?: 1.0
 
+        // Read up here, not beside the picker: the FACE branches on it too.
+        val inlinePicker = config.bool("inline", false)
         val holdEntity = config.string("hold_entity")
         val holdingReported = holdEntity?.let { ctx.entities[it]?.isOn == true } == true
         @Suppress("UNCHECKED_CAST")
@@ -150,18 +153,40 @@ class BubbleClimateCard : CardRenderer {
         // matched neither the cooling nor the heating branch and fell through to
         // the blue default -- so a heating system was drawn in cooling colours
         // whenever it was not actively burning.
-        val heatColor = Color(0xFFD98032)
-        val coolColor = Color(0xFF4C8DFF)
+        //
+        // The app's blue is a PAIR, not one colour: #2E7D95 fills a surface,
+        // #7FD8F0 marks on top of one (dock tiles, the dock status pills, the
+        // mute icon). Climate used to carry its own royal #4C8DFF, so the very
+        // same "cooling" idea was drawn in two different blues between the dock
+        // index tile and this page. Orange is left exactly as it was.
+        //
+        // Hence two accents everywhere below: `accent` fills, `accentMark`
+        // marks. Orange is legible in both roles, so heat uses one colour for
+        // the two of them; a single blue could not be -- #7FD8F0 is too light
+        // to carry white text, #2E7D95 too dark to read as a tint.
+        // Orange gets the same two-tone treatment for the same reason, which
+        // also settles the two-oranges problem: #D98032 (this card) and
+        // #E8A33D (the dock's heat pill) were never really disagreeing about
+        // the hue, they were each right for a different job. The darker one
+        // fills, the lighter one marks -- so the heat text on this page is now
+        // the exact colour of the heat pill on the dock index.
+        val heatFill = Color(0xFFD98032)
+        val heatMark = Color(0xFFE8A33D)
+        val coolFill = Color(0xFF2E7D95)
+        val coolMark = Color(0xFF7FD8F0)
         val accent = when (mode) {
-            "heat" -> heatColor
-            "cool" -> coolColor
+            "heat" -> heatFill
+            "cool" -> coolFill
             "off" -> Color(0xFF41606B)
-            "heat_cool" -> when (action) {
-                "heating" -> heatColor
-                "cooling" -> coolColor
-                else -> coolColor
-            }
-            else -> coolColor
+            "heat_cool" -> if (action == "heating") heatFill else coolFill
+            else -> coolFill
+        }
+        val accentMark = when (mode) {
+            "heat" -> heatMark
+            "cool" -> coolMark
+            "off" -> Color(0xFF5A7683)
+            "heat_cool" -> if (action == "heating") heatMark else coolMark
+            else -> coolMark
         }
 
         val hvacModes = e?.attrStringList("hvac_modes") ?: listOf("off", "heat", "cool", "heat_cool")
@@ -193,6 +218,32 @@ class BubbleClimateCard : CardRenderer {
         var picking by remember { mutableStateOf(false) }
         OpenOverlays.Track(picking)
 
+        // DOCK LAYOUT: one centred column, because here the card IS the page.
+        // The side-by-side face exists to save height on a page shared with
+        // lights, shades and a fan; with the whole screen there is no reason to
+        // push the number the eye goes to off to one edge.
+        if (inlinePicker) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    current?.let { fmt(it) } ?: "\u2014",
+                    color = Color(0xFFF1F4FA),
+                    // The page's headline number; it has the room for it here.
+                    fontSize = 68.sp,
+                    fontWeight = FontWeight.Light,
+                )
+                Text(
+                    actionLabel(action, mode),
+                    color = if (action in setOf("cooling", "heating", "drying")) accentMark
+                            else Color(0xFF93AFB6),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+        } else {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -227,7 +278,7 @@ class BubbleClimateCard : CardRenderer {
                     // Tinted only while actually running. Idle in grey keeps the
                     // colour meaningful: if everything were accent-coloured the
                     // colour would stop being the signal.
-                    color = if (action in setOf("cooling", "heating", "drying")) accent
+                    color = if (action in setOf("cooling", "heating", "drying")) accentMark
                             else Color(0xFF93AFB6),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
@@ -243,7 +294,7 @@ class BubbleClimateCard : CardRenderer {
                     .height(42.dp)
                     .clip(RoundedCornerShape(21.dp))
                     .background(ackColor(Color(0x00000000), press))
-                    .border(2.dp, accent, RoundedCornerShape(21.dp))
+                    .border(2.dp, accentMark, RoundedCornerShape(21.dp))
                     .pressFeedback(press, click)
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -256,7 +307,7 @@ class BubbleClimateCard : CardRenderer {
                 if (mode == "heat_cool" && (low != null || high != null)) {
                     Text(
                         low?.let { fmt(it) } ?: "—",
-                        color = heatColor,
+                        color = heatMark,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -267,14 +318,14 @@ class BubbleClimateCard : CardRenderer {
                     )
                     Text(
                         high?.let { fmt(it) } ?: "—",
-                        color = coolColor,
+                        color = coolMark,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                     )
                 } else {
                     Text(
                         target?.let { fmt(it) } ?: "—",
-                        color = accent,
+                        color = accentMark,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -310,8 +361,10 @@ class BubbleClimateCard : CardRenderer {
                 }
             }
         }
+        }
 
-        if (picking) {
+
+        if (picking || inlinePicker) {
             TempPicker(
                 mode = mode,
                 hvacModes = hvacModes,
@@ -322,12 +375,52 @@ class BubbleClimateCard : CardRenderer {
                 minTemp = minTemp,
                 maxTemp = maxTemp,
                 accent = accent,
-                heatColor = heatColor,
+                accentMark = accentMark,
+                coolColor = coolFill,
+                heatColor = heatFill,
+                heatMark = heatMark,
                 onPick = { setTemp(it) },
                 onPickRange = { lo, hi -> setRange(lo, hi) },
                 onMode = { setMode(it) },
+                inline = inlinePicker,
+                showModeSlot = !inlinePicker,
                 onDismiss = { picking = false },
             )
+            // Holding sits BELOW the wheel here rather than inside the setpoint
+            // pill: the pill is not on screen in this layout, and a hold is a
+            // statement about the schedule, not about the number.
+            if (inlinePicker && holding) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Holding", color = Color(0xFFF1F4FA), fontSize = 15.sp)
+                    if (clearHold != null) {
+                        Spacer(Modifier.width(8.dp))
+                        val (hp, hc) = rememberPressFeedback {
+                            suppressHold = true
+                            fire(ctx, clearHold)
+                        }
+                        Box(
+                            Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(ackColor(Color(0x33FFFFFF), hp))
+                                .pressFeedback(hp, hc),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Resume schedule",
+                                tint = Color(0xFFF1F4FA),
+                                modifier = Modifier.size(17.dp),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -358,10 +451,17 @@ class BubbleClimateCard : CardRenderer {
         minTemp: Double,
         maxTemp: Double,
         accent: Color,
+        accentMark: Color,
+        coolColor: Color,
         heatColor: Color,
+        heatMark: Color,
         onPick: (Double) -> Unit,
         onPickRange: (Double, Double) -> Unit,
         onMode: (String) -> Unit,
+        /** Render the body straight onto the page instead of inside a Dialog. */
+        inline: Boolean,
+        /** Hide the inline mode button when something else owns mode (the dock). */
+        showModeSlot: Boolean,
         onDismiss: () -> Unit,
     ) {
         val stepped = if (step <= 0) 1.0 else step
@@ -377,11 +477,31 @@ class BubbleClimateCard : CardRenderer {
             else -> target
         }
 
-        Dialog(onDismissRequest = onDismiss) {
+        // Same body either way; only the container differs. Inline is for the
+        // dock, where this IS the page and a modal inside a page would just be
+        // a second layer to dismiss for no gain.
+        val body = @Composable {
             Column(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(Color(0xFF14262E))
+                    // Inline, this panel IS the page, so it takes the page's
+                    // width. Wrapping its content instead left it 24px off the
+                    // centre line -- not because anything inside it was
+                    // unbalanced (the 52dp slot and the 52dp stepper column
+                    // measure equal), but because the dock's card container
+                    // left-aligns a narrower child while the temperature above
+                    // it is centred. Two elements, two different centres.
+                    // Inline the picker IS the page, so it needs neither the
+                    // width-shrink nor the raised panel: a filled card floating
+                    // on a page with nothing beside it is a container drawn
+                    // around the only thing there is. In the dialog it still
+                    // earns its background, because there it has to separate
+                    // itself from the dashboard behind it.
+                    .then(
+                        if (inline) Modifier.fillMaxWidth()
+                        else Modifier
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(Color(0xFF14262E))
+                    )
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -412,7 +532,7 @@ class BubbleClimateCard : CardRenderer {
                         ) { editHeat = true }
                         ModePill(
                             high?.let { "Cool ${fmt(it)}" } ?: "Cool",
-                            selected = !editHeat, accent = Color(0xFF4C8DFF),
+                            selected = !editHeat, accent = coolColor,
                         ) { editHeat = false }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -422,7 +542,7 @@ class BubbleClimateCard : CardRenderer {
                     // Nothing sensible to scroll to. Saying so is better than a
                     // wheel that commits a setpoint to a system that is off.
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        ModeSlot(mode, modeOpen, accent) { modeOpen = !modeOpen }
+                        if (showModeSlot) ModeSlot(mode, modeOpen, accent, accentMark) { modeOpen = !modeOpen }
                         Text(
                             if (mode == "off") "System is off" else "No setpoint",
                             color = Color(0xFF93AFB6),
@@ -440,7 +560,16 @@ class BubbleClimateCard : CardRenderer {
                         // and with steppers on one side only, the wheel -- the
                         // thing the eye actually goes to -- sat off-centre by half
                         // their width. Matching slots put it back on the middle.
-                        ModeSlot(mode, modeOpen, accent) { modeOpen = !modeOpen }
+                        // The slot is kept even when the button is hidden. Its
+                        // whole purpose is to balance the +/- column opposite, so
+                        // removing it (rather than emptying it) shifted the wheel
+                        // off-centre by half their width -- exactly what the
+                        // matching-slots note above was guarding against.
+                        if (showModeSlot) {
+                            ModeSlot(mode, modeOpen, accent, accentMark) { modeOpen = !modeOpen }
+                        } else {
+                            Spacer(Modifier.width(SIDE_SLOT))
+                        }
                         Spacer(Modifier.width(12.dp))
                         Wheel(
                             // Keyed on MODE as well as bound. Heat and Cool store
@@ -466,14 +595,14 @@ class BubbleClimateCard : CardRenderer {
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            StepBtn(Icons.Filled.Add, accent) {
+                            StepBtn(Icons.Filled.Add, if (isAuto && editHeat) heatMark else accentMark) {
                                 val v = (editing + stepped).coerceAtMost(maxTemp)
                                 if (isAuto) {
                                     if (editHeat) onPickRange(minOf(v, high ?: maxTemp), high ?: maxTemp)
                                     else onPickRange(low ?: minTemp, v)
                                 } else onPick(v)
                             }
-                            StepBtn(Icons.Filled.Remove, accent) {
+                            StepBtn(Icons.Filled.Remove, if (isAuto && editHeat) heatMark else accentMark) {
                                 val v = (editing - stepped).coerceAtLeast(minTemp)
                                 if (isAuto) {
                                     if (editHeat) onPickRange(v, high ?: maxTemp)
@@ -485,6 +614,7 @@ class BubbleClimateCard : CardRenderer {
                 }
             }
         }
+        if (inline) body() else Dialog(onDismissRequest = onDismiss) { body() }
     }
 
     private fun modeIcon(mode: String): ImageVector = when (mode) {
@@ -505,7 +635,7 @@ class BubbleClimateCard : CardRenderer {
      * SLOT's width matters for the layout; the button's does not.
      */
     @Composable
-    private fun ModeSlot(mode: String, open: Boolean, accent: Color, onClick: () -> Unit) {
+    private fun ModeSlot(mode: String, open: Boolean, accent: Color, mark: Color, onClick: () -> Unit) {
         Box(
             modifier = Modifier.width(SIDE_SLOT),
             contentAlignment = Alignment.Center,
@@ -523,7 +653,7 @@ class BubbleClimateCard : CardRenderer {
                 Icon(
                     modeIcon(mode),
                     contentDescription = "Mode",
-                    tint = if (open) Color.White else accent,
+                    tint = if (open) Color.White else mark,
                     modifier = Modifier.size(21.dp),
                 )
             }
@@ -533,7 +663,7 @@ class BubbleClimateCard : CardRenderer {
     /** Small selectable pill, used for both the mode row and the bound toggle. */
     @Composable
     private fun ModePill(label: String, selected: Boolean, accent: Color, onClick: () -> Unit) {
-        val (press, click) = rememberPressFeedback(onClick)
+        val (press, click) = rememberPressFeedback(onClick = onClick)
         Box(
             modifier = Modifier
                 .height(34.dp)
@@ -580,9 +710,14 @@ class BubbleClimateCard : CardRenderer {
             while (v >= minTemp) { out.add(v); v -= stepped }
             out
         }
-        val startIndex = remember(key, values) {
-            values.indexOfFirst { kotlin.math.abs(it - value) < stepped / 2 }.coerceAtLeast(0)
-        }
+        // NEAREST, not "within half a step". The old exact-ish match returned
+        // -1 for anything sitting precisely on a boundary, and a thermostat
+        // resuming its schedule is exactly where that bites: ecobee schedules
+        // in half degrees, so cancelling a hold handed back something like
+        // 73.5 against a 1-degree wheel, no index matched, and the dial simply
+        // stayed on the old hold value while the card above it showed the new
+        // one. There is always a nearest row; show it.
+        val startIndex = remember(key, values) { nearestIndex(values, value) }
         val listState = remember(key) { LazyListState(firstVisibleItemIndex = startIndex) }
         val fling = rememberSnapFlingBehavior(lazyListState = listState)
 
@@ -596,6 +731,15 @@ class BubbleClimateCard : CardRenderer {
             }
         }
 
+        // True only while a real finger is driving the list. Everything below
+        // hangs off this.
+        var userDriven by remember(key) { mutableStateOf(false) }
+        LaunchedEffect(listState) {
+            listState.interactionSource.interactions.collect {
+                if (it is DragInteraction.Start) userDriven = true
+            }
+        }
+
         // Re-centre when the value arrives from HA rather than from a scroll.
         // Switching Heat<->Cool fires a service call and the new mode's setpoint
         // only lands a moment later, so rebuilding the wheel on the key alone
@@ -603,14 +747,22 @@ class BubbleClimateCard : CardRenderer {
         // isScrollInProgress so it can never fight a finger.
         LaunchedEffect(key, value) {
             if (!listState.isScrollInProgress) {
-                val idx = values.indexOfFirst { kotlin.math.abs(it - value) < stepped / 2 }
-                if (idx >= 0) listState.scrollToItem(idx)
+                userDriven = false
+                listState.scrollToItem(nearestIndex(values, value))
             }
         }
 
         LaunchedEffect(listState) {
             snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
-                if (!scrolling) {
+                // Only a scroll the USER performed may write back. Without this
+                // gate the re-centre above becomes a command: land on 74 to
+                // display an incoming 73.5, and the settle handler reads the
+                // half-degree difference as a change worth sending -- which
+                // would push a setpoint at the thermostat and re-create the
+                // hold that was just cancelled. A display update must not turn
+                // into a service call.
+                if (!scrolling && userDriven) {
+                    userDriven = false
                     values.getOrNull(centeredIndex)?.let { v ->
                         if (kotlin.math.abs(v - value) >= stepped / 2) onSettle(v)
                     }
@@ -656,9 +808,13 @@ class BubbleClimateCard : CardRenderer {
         }
     }
 
+    /** Row whose value is closest to [value]; never -1, the wheel always shows something. */
+    private fun nearestIndex(values: List<Double>, value: Double): Int =
+        values.indices.minByOrNull { kotlin.math.abs(values[it] - value) } ?: 0
+
     @Composable
     private fun StepBtn(icon: ImageVector, accent: Color, onClick: () -> Unit) {
-        val (press, click) = rememberPressFeedback(onClick)
+        val (press, click) = rememberPressFeedback(onClick = onClick)
         Box(
             modifier = Modifier
                 .size(52.dp)

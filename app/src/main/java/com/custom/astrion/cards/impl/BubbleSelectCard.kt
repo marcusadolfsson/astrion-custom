@@ -9,6 +9,29 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.AcUnit
+import androidx.compose.material.icons.filled.AirlineSeatFlatAngled
+import androidx.compose.material.icons.filled.LooksOne
+import androidx.compose.material.icons.filled.LooksTwo
+import androidx.compose.material.icons.filled.Looks3
+import androidx.compose.material.icons.filled.AirlineSeatFlat
+import androidx.compose.material.icons.filled.AirlineSeatReclineExtra
+import androidx.compose.material.icons.filled.AirlineSeatReclineNormal
+import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.BrightnessHigh
+import androidx.compose.material.icons.filled.BrightnessLow
+import androidx.compose.material.icons.filled.Celebration
+import androidx.compose.material.icons.filled.East
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.North
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Spa
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.VerticalAlignCenter
+import androidx.compose.material.icons.filled.West
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Blinds
@@ -16,6 +39,11 @@ import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KingBed
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material.icons.filled.Thermostat
@@ -30,7 +58,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -394,6 +425,65 @@ class BubbleSelectCard : CardRenderer {
 
 /** Maps a small set of config icon names to Material icons (shared by the bubble
  *  select + separator cards). Extend as needed. */
+/**
+ * A ceiling fan, drawn rather than borrowed.
+ *
+ * Compose's Material set has no `mode_fan`: the only fan glyph is `ModeFanOff`,
+ * which carries an "off" slash, and the near-misses are worse -- `Toys` is a toy
+ * CAR and `FilterVintage` is a flower. Four blades round a hub at 24x24, matching
+ * the Material grid so it sits at the same weight as the icons beside it.
+ */
+/**
+ * Material Symbols `mode_fan`, verbatim.
+ *
+ * Compose's bundled icon set has no `mode_fan` -- the only fan glyph is
+ * `ModeFanOff`, which carries an "off" slash. Four substitutions were tried and
+ * all read wrong at 44dp (`Toys` is a toy CAR, `FilterVintage` is a flower, and a
+ * hand-drawn cross/clover looked like neither), so this is the real path data
+ * from fonts.gstatic.com rather than another approximation.
+ *
+ * Two things make it work:
+ *  - PathParser parses the SVG string at runtime, so the 1.1kB path is embedded
+ *    as-is instead of being hand-converted into PathBuilder calls.
+ *  - Material Symbols use a `0 -960 960 960` viewBox: x runs 0..960 but y runs
+ *    -960..0. ImageVector has no viewBox offset, so the path sits in a group
+ *    translated +960 in y. Without that it draws entirely above the canvas and
+ *    renders as nothing at all.
+ */
+private val CeilingFan: ImageVector by lazy {
+    val d = "M424-80q-51 0-77.5-30.5T320-180q0-26 11.5-50.5T367-271q22-14 35.5-36t18.5-47l-12-6q-6-3-11-7l-92 33q-17 6-33 10t-33 4q-63 0-111.5-55T80-536q0-51 30.5-77.5T179-640q26 0 51 11.5t41 35.5q14 22 36 35.5t47 18.5l6-12q3-6 7-11l-33-92q-6-17-10-33t-4-32q0-64 55-112.5T536-880q51 0 77.5 30.5T640-781q0 26-11.5 51T593-689q-22 14-35.5 36T539-606l12 6q6 3 11 7l92-34q17-6 32.5-9.5T719-640q81 0 121 67t40 149q0 51-32 77.5T777-320q-25 0-48.5-11.5T689-367q-14-22-36-35.5T606-421l-6 12q-3 6-7 11l33 92q6 16 10 30.5t4 30.5q1 65-54 115T424-80Zm56-340q25 0 42.5-17.5T540-480q0-25-17.5-42.5T480-540q-25 0-42.5 17.5T420-480q0 25 17.5 42.5T480-420Zm-46-192q6-2 12.5-3.5T459-618q8-42 30.5-78t59.5-60q5-4 8-10t3-15q0-8-6-13.5t-18-5.5q-38 0-86 16.5T400-719q0 9 2.5 17t4.5 15l27 75ZM240-400q14 0 33-7l75-27q-2-6-3.5-12.5T342-459q-42-8-78-30.5T204-549q-4-5-10.5-8t-14.5-3q-9 0-14 6t-5 18q0 54 20.5 95t59.5 41Zm184 240q47 0 92.5-19t43.5-66q0-8-2.5-15t-4.5-13l-27-75q-6 2-12.5 3.5T501-342q-8 42-30.5 78T411-204q-5 4-8.5 10.5T400-180q1 8 6 14t18 6Zm353-240q9 0 16-5t7-19q0-38-16-86.5T719-560q-9 0-17 2t-15 4l-75 28q2 6 3.5 12.5T618-501q42 8 78 30.5t60 59.5q3 5 9 8t12 3ZM618-501ZM459-618ZM342-459Zm159 117Z"
+    ImageVector.Builder(
+        name = "ModeFan",
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 960f, viewportHeight = 960f,
+    ).apply {
+        addGroup(name = "shift", translationY = 960f)
+        addPath(PathParser().parsePathString(d).toNodes(), fill = SolidColor(Color.White))
+        clearGroup()
+    }.build()
+}
+
+/**
+ * Material Symbols `table_lamp`, verbatim -- same treatment as [CeilingFan]:
+ * Compose's bundled set has no lamp beyond a bare bulb, and the nightstand
+ * lights want to read as lamps rather than as another scene.
+ *
+ * Note the `0 -960 960 960` viewBox: y runs -960..0, so the path sits in a group
+ * translated +960 or it draws entirely off-canvas.
+ */
+private val TableLamp: ImageVector by lazy {
+    val d = "M520-120v-80h320v80H520ZM221-600h139v-160h-69l-70 160Zm419 360v-400q0-17-11.5-28.5T600-680H440v120q0 17-11.5 28.5T400-520H160q-22 0-34-18t-3-38l95-216q10-22 29.5-35t43.5-13h69q33 0 56.5 23.5T440-760h160q50 0 85 35t35 85v400h-80ZM221-600h139-139Z"
+    ImageVector.Builder(
+        name = "TableLamp",
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 960f, viewportHeight = 960f,
+    ).apply {
+        addGroup(name = "shift", translationY = 960f)
+        addPath(PathParser().parsePathString(d).toNodes(), fill = SolidColor(Color.White))
+        clearGroup()
+    }.build()
+}
+
 object CardIcons {
     fun forName(n: String?): ImageVector = when (n?.lowercase()) {
         "tv", "activity", "source", "watch" -> Icons.Filled.Tv
@@ -401,13 +491,72 @@ object CardIcons {
         "screen", "aspect", "layout", "display" -> Icons.Filled.AspectRatio
         "movie", "theater", "scene" -> Icons.Filled.Movie
         "light", "bulb", "lights" -> Icons.Filled.Lightbulb
+        "lamp", "table-lamp", "nightstand" -> TableLamp
         "curtain", "shade", "shades", "blinds" -> Icons.Filled.Blinds
         "thermostat", "climate", "ac", "temp" -> Icons.Filled.Thermostat
         "remote" -> Icons.Filled.SettingsRemote
+        "open", "up", "arrow-up" -> Icons.Filled.KeyboardArrowUp
+        "close", "down", "arrow-down" -> Icons.Filled.KeyboardArrowDown
+        "stop" -> Icons.Filled.Stop
+        "x", "cancel", "clear" -> Icons.Filled.Close
+        "lock", "locked" -> Icons.Filled.Lock
         // The app-drawer grid, for the launcher slot.
         "apps", "grid", "drawer" -> Icons.Filled.Apps
         "bed", "sleep", "position" -> Icons.Filled.KingBed
-        "fan", "air", "ceiling-fan" -> Icons.Filled.Air
+        // A ceiling fan reads as blades from below, not as moving air. NB the
+        // trap: Material's pinwheel-sounding icon is a toy CAR. FilterVintage is
+        // the petal/rotor shape and is the closest thing to a fan in the set.
+        "fan", "ceiling-fan", "mode_fan", "propeller" -> CeilingFan
+        "air", "airflow" -> Icons.Filled.Air
+        // Power, for every "Off" in the dock -- the one name that appears in
+        // nearly every menu and meant "no icon" until now.
+        "power", "off", "standby" -> Icons.Filled.PowerSettingsNew
+        "game", "gamepad", "console", "nintendo" -> Icons.Filled.SportsEsports
+        // Brightness is a RAMP, so the three presets get the three steps of one
+        // family rather than three unrelated glyphs. "brightness" above is the
+        // middle of it, which is what Normal uses.
+        "brightness-auto" -> Icons.Filled.BrightnessAuto
+        "bright", "brightness-high" -> Icons.Filled.BrightnessHigh
+        "dim", "brightness-low" -> Icons.Filled.BrightnessLow
+        "entertain", "party" -> Icons.Filled.Celebration
+        "relax", "spa", "calm" -> Icons.Filled.Spa
+        "romance", "heart", "love" -> Icons.Filled.Favorite
+        "night", "good-night", "bedtime", "moon" -> Icons.Filled.Bedtime
+        // NB "auto" is deliberately NOT a key. It is the one word in the config
+        // that names two different things -- the wall's brightness preset and
+        // the thermostat's mode -- so each spells out which it means and an
+        // unqualified "auto" stays an error rather than silently picking one.
+        "cool", "cooling", "snowflake" -> Icons.Filled.AcUnit
+        "heat", "heating", "flame" -> Icons.Filled.LocalFireDepartment
+        "auto-mode", "hvac-auto" -> Icons.Filled.Autorenew
+        // Fan speeds as numbered settings, which is how every fan remote in the
+        // house labels them. The first attempt used the cellular-signal bars --
+        // graded correctly, but the shape means RECEPTION to anyone who has used
+        // a phone, and a fan tile is not where you want that read.
+        "speed-high" -> Icons.Filled.Looks3
+        "speed-medium" -> Icons.Filled.LooksTwo
+        "speed-low" -> Icons.Filled.LooksOne
+        // Shade targets. Compass for the rooms named by direction, and the same
+        // arrows re-used for the bay window's left/centre/right.
+        "north" -> Icons.Filled.North
+        "east", "right" -> Icons.Filled.East
+        "west", "left" -> Icons.Filled.West
+        "center", "centre" -> Icons.Filled.VerticalAlignCenter
+        // Bed positions. The airline-seat family is the only set in Material
+        // that draws a RECLINE ANGLE, which is exactly what these presets are --
+        // so ALL FOUR use it, and the four glyphs happen to sit in the same
+        // order as the positions themselves:
+        //
+        //   Flat -> Snore (barely raised) -> Zero G -> TV (most upright)
+        //
+        // Snore and TV were the odd ones out before: a snooze clock and a
+        // television, both describing what the position is FOR rather than what
+        // the bed is doing. Next to two seat glyphs they read as a different
+        // kind of control.
+        "flat" -> Icons.Filled.AirlineSeatFlat
+        "snore", "flat-angled" -> Icons.Filled.AirlineSeatFlatAngled
+        "zero-g", "recline" -> Icons.Filled.AirlineSeatReclineExtra
+        "upright", "sit", "bed-tv" -> Icons.Filled.AirlineSeatReclineNormal
         else -> Icons.Filled.Tune
     }
 }

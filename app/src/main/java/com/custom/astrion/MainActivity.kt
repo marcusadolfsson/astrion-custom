@@ -100,19 +100,14 @@ class MainActivity : ComponentActivity() {
          */
         const val GRAVITY_LPF = 0.15f
         /**
-         * Samples below this fraction of g are discarded as impossible.
-         *
-         * master_1's accelerometer intermittently reports z ~1.45 m/s^2 instead
-         * of ~9.81. Captured 2026-08-28 with mag/prevMag in the motion log: the
-         * bad reading is ALWAYS exactly 1.46, never a scatter, so it is a driver
-         * artefact rather than noise.
-         *
-         * Only the LOW side is rejected. Real movement pushes magnitude ABOVE
-         * 1 g; only free fall takes it toward zero, and a remote on a dresser
-         * does not free-fall several times a minute. 0.5 leaves room for a
-         * genuine drop to still register while sitting far above the artefact.
+         * How fast the resting-magnitude baseline tracks. Slow, because resting
+         * |a| is orientation-independent (~g, or this unit's biased constant),
+         * so it barely moves in normal use and a burst of rejected spikes can
+         * never nudge it -- only accepted samples update it. The plausibility
+         * band itself lives in MotionWakeConfig now (low AND high, per the
+         * master_1/master_2 faults documented there).
          */
-        const val IMPLAUSIBLE_LOW_RATIO = 0.5f
+        const val REST_LPF = 0.02f
 
         /** How far resting |a| may sit from 1 g before it is worth warning about. */
         const val GRAVITY_EARTH_TOLERANCE = 2.0f
@@ -145,6 +140,13 @@ class MainActivity : ComponentActivity() {
     private var sensorManager: SensorManager? = null
     private var motionSensor: Sensor? = null
     private var lastMagnitude = 0f
+    /**
+     * Slow baseline of resting |a|, seeded at g and nudged only by accepted
+     * samples. The plausibility band is taken relative to this, so each sample
+     * is judged against the device's own rest and a constant sensor bias
+     * cancels. See [MotionWakeConfig.implausibleHighRatio].
+     */
+    private var restMag = SensorManager.GRAVITY_EARTH
     private var lastWakeMs = 0L
     /** Above-threshold samples seen inside the current window. */
     private var motionHits = 0
@@ -220,14 +222,28 @@ class MainActivity : ComponentActivity() {
             // Neither was visible until mag/prevMag/gap were logged, and
             // neither is diagnosable over adb, which keeps the device out of
             // suspend and stops the bursts entirely.
-            if (mag < SensorManager.GRAVITY_EARTH * IMPLAUSIBLE_LOW_RATIO) {
+            // Baseline-relative plausibility band, BOTH sides. A sample outside
+            // restMag*[low..high] is a sensor artefact and is dropped before it
+            // touches any state -- the gravity estimate, lastMagnitude, the jerk
+            // term, the still tracker. This is what stops both known faults:
+            // master_1's low ~1.46 spikes that dragged the estimate down into a
+            // false tilt, and master_2's high ~22.45 spikes that read as jerk on
+            // every alternating sample and woke it every ~30s all night. The band
+            // is relative to this unit's own rest, so a biased sensor is judged
+            // against itself, not against g.
+            val loMag = restMag * cfg.implausibleLowRatio
+            val hiMag = restMag * cfg.implausibleHighRatio
+            if (mag < loMag || mag > hiMag) {
                 if (!implausibleWarned) {
                     implausibleWarned = true
-                    Log.w(KEY_TAG, "discarding implausible accelerometer samples (first was %.2f m/s^2, expected ~9.81) (device=%s)"
-                        .format(mag, deviceName))
+                    Log.w(KEY_TAG, "discarding implausible accelerometer samples (first was %.2f m/s^2, plausible band %.2f..%.2f around rest %.2f) (device=%s)"
+                        .format(mag, loMag, hiMag, restMag, deviceName))
                 }
                 return
             }
+            // Accepted: nudge the resting baseline. Accepted samples only, so a
+            // burst of rejected spikes can never move the band that rejects them.
+            restMag += (mag - restMag) * REST_LPF
 
             // Gap since the previous sample. Recorded before the seed branch
             // below returns, so a re-seed still leaves a usable timestamp.
@@ -433,7 +449,7 @@ class MainActivity : ComponentActivity() {
     private val dockWatchdog = object : Runnable {
         override fun run() {
             val was = charging
-            charging = readCharging() ?: charging
+            setCharging(readCharging() ?: charging)
             if (charging != was) {
                 Log.i(KEY_TAG, "power state -> " + (if (charging) "charging" else "not charging"))
                 if (charging) onDocked() else onUndocked()
@@ -461,6 +477,33 @@ class MainActivity : ComponentActivity() {
 
     /** True while the idle clock is covering the dashboard. */
     private var screensaverOn by mutableStateOf(false)
+
+    /**
+     * Compose-observable mirror of [charging], for the dock card view.
+     *
+     * [charging] itself is @Volatile and written from the dock watchdog and the
+     * power broadcast; a plain field is invisible to composition. Mirrored here
+     * at the two funnel points (onDocked/onUndocked) rather than making
+     * `charging` a snapshot state, so nothing on a background path can write
+     * snapshot state off the main thread.
+     */
+    private var dockedUi by mutableStateOf(false)
+
+    /**
+     * The ONLY place [charging] is written, so [dockedUi] can never drift from it.
+     *
+     * It drifted once already: `charging` was set directly at startup/resume and
+     * in the dock-display re-read, neither of which goes through
+     * onDocked()/onUndocked(). A remote that was ALREADY on power when the app
+     * started therefore came up with charging=true but dockedUi=false, and the
+     * watchdog -- which only acts on a CHANGE -- then saw was==charging and never
+     * fired. The dock view stayed invisible until someone physically unplugged
+     * and replugged the remote, which is exactly the case a dock is never in.
+     */
+    private fun setCharging(v: Boolean) {
+        charging = v
+        dockedUi = v
+    }
 
     /**
      * Arm the idle timer that raises the clock, cancelling any previous one.
@@ -501,6 +544,10 @@ class MainActivity : ComponentActivity() {
         keyHandler.removeCallbacks(showScreensaver)
         if (saverCfg().enabled && charging) {
             screensaverOn = true
+            // Coming back to a dark remote should be coming back to the
+            // top: a submenu left open an hour ago is not where anyone
+            // wants to resume, and the dock view is the status panel.
+            com.custom.astrion.cards.impl.DockMenuState.path = emptyList()
             applyDockDisplay()
         } else {
             armScreensaver()
@@ -544,6 +591,10 @@ class MainActivity : ComponentActivity() {
         Log.i(KEY_TAG, "screensaver fire: enabled=" + saverCfg().enabled + " charging=" + charging)
         if (saverCfg().enabled && charging) {
             screensaverOn = true
+            // Coming back to a dark remote should be coming back to the
+            // top: a submenu left open an hour ago is not where anyone
+            // wants to resume, and the dock view is the status panel.
+            com.custom.astrion.cards.impl.DockMenuState.path = emptyList()
             // Re-apply so the backlight comes up to the clock's own level.
             applyDockDisplay()
         }
@@ -567,8 +618,8 @@ class MainActivity : ComponentActivity() {
                     client.reconnectNow()
                 }
                 Intent.ACTION_SCREEN_OFF -> screenOffAt = SystemClock.elapsedRealtime()
-                Intent.ACTION_POWER_CONNECTED -> { charging = true; onDocked() }
-                Intent.ACTION_POWER_DISCONNECTED -> { charging = false; onUndocked() }
+                Intent.ACTION_POWER_CONNECTED -> { setCharging(true); onDocked() }
+                Intent.ACTION_POWER_DISCONNECTED -> { setCharging(false); onUndocked() }
             }
         }
     }
@@ -628,7 +679,7 @@ class MainActivity : ComponentActivity() {
         // Re-read power state here rather than trusting the cached flag: the
         // connect broadcast can be missed while the app is stopped, and this is
         // the cheap moment to notice.
-        charging = readCharging() ?: charging
+        setCharging(readCharging() ?: charging)
         if (!charging || !dockCfg().enabled) {
             applyDockDisplay()
             return
@@ -1333,6 +1384,7 @@ class MainActivity : ComponentActivity() {
                     voiceState = voiceState.value,
                     onVoiceDismiss = { voice.dismiss() },
                     onPageChange = { i -> onPagerSettled(i) },
+                    docked = dockedUi,
                     deviceName = deviceName,
                     settingsOpen = settingsOpen,
                     onSettingsOpen = { settingsOpen = it; if (it) refreshAdbStatus() },
@@ -1392,7 +1444,21 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Any touch counts as interaction for the dock's brightness. */
+    /** Temporary: counts raw touch actions to prove whether MOVEs reach the app. */
+    private var touchDowns = 0
+    private var touchMoves = 0
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { touchDowns++; touchMoves = 0 }
+            MotionEvent.ACTION_MOVE -> touchMoves++
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                Log.i(
+                    KEY_TAG,
+                    "touch: downs=%d moves=%d action=%d saver=%b x=%.0f y=%.0f"
+                        .format(touchDowns, touchMoves, ev.actionMasked, screensaverOn, ev.x, ev.y),
+                )
+        }
         // Consume the touch that dismisses the clock. Otherwise the tap that
         // wakes the dashboard also lands on whatever card happens to be under
         // the finger -- which on this layout could be an activity or a shade.
@@ -1408,7 +1474,7 @@ class MainActivity : ComponentActivity() {
         // connect/disconnect broadcast -- otherwise a remote that was already on
         // charge when the app started would sit in the wrong mode until someone
         // unplugged it.
-        charging = readCharging() ?: false
+        setCharging(readCharging() ?: false)
         // Re-read the local cache on foreground (instant, no network). Pulling
         // from HA is now on-demand — swipe up for the info panel's Sync button,
         // or the VOICE hotkey — not on every resume.

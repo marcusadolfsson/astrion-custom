@@ -94,10 +94,11 @@ layout) is unchanged. Each item below landed as its own commit.
 
 | Area | Change |
 |---|---|
-| **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional`, `dpad` |
+| **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional`, `dpad`, `dock_menu` |
+| **Dock view** | `dock_cards:` renders a page as a 2-wide grid of large buttons with live state on every tile, nested menus, and swipe-right-to-go-back that reveals the level underneath |
 | **Changed cards** | `bubble_climate` rebuilt (hold indicator, mode + dual setpoints, scrolling picker), brightness sliders and a radio latch button inside `bubble_select`, `media_player` transport rework + auto-collapse + stale-metadata guard, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
 | **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
-| **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, swipe-up info panel, per-remote start page, tilt-based motion wake and dock display |
+| **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, a device panel, per-remote start page, tilt-based motion wake and dock display |
 | **Voice** | the VOICE key streams the mic to an endpoint you configure; ends on silence |
 | **Input bridge** | screen-off keys via a direct `/dev/input` reader, and a `/system/etc/init` boot hook that starts it (and re-enables adb-TCP) unattended on every boot |
 | **UI** | dark theme so menus and dialogs stop arriving white, press feedback on controls that answer late, transient volume / mute overlay, voice indicator |
@@ -162,7 +163,7 @@ a toolchain — but **adding a brand-new card type means compiling** (see
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
-adb install releases/astrion-custom-0.98.0.apk
+adb install releases/astrion-custom-1.23.0.apk
 ```
 
 **Option B — build from source.** You need:
@@ -342,7 +343,7 @@ Assistant URL and a **long-lived access token** (HA → profile → Security).
 
 Credentials are stored in the app's private storage — **not** in the APK, and not
 on `/sdcard` where any app with storage permission could read them. The setup
-server stops as soon as they're saved; reopen it later from the swipe-up info
+server stops as soon as they're saved; reopen it later from the device
 panel.
 
 ### 8. Add your layout
@@ -357,7 +358,8 @@ If you'd rather serve a plain JSON file from HA's `www/` folder (`/local/…`)
 instead, that means changing `DashboardLoader.REMOTE_PATH` — a code change, so
 it only applies if you're building from source.
 
-Sync to the remote any time from the **swipe-up panel → Sync**, or a hotkey with
+Sync to the remote any time from the **device panel → Sync** (swipe down from the
+status bar, or tap the page name), or a hotkey with
 `"action": "sync"`. The layout is cached on the device, so the remote still works
 if HA is unreachable.
 

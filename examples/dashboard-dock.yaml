@@ -1,0 +1,397 @@
+# ============================================================================
+# OPTIONAL LAYOUT: big touch points (`dock_cards`)
+# ============================================================================
+#
+# A drop-in alternative to the scrolling card list in `dashboard.yaml`: a
+# 2-wide grid of large buttons, each opening a submenu of equally large ones.
+#
+# Use it if you hold the remote loosely, prop it in a cradle, or just miss more
+# taps than you would like. A 3" screen at arm's length does not give a card
+# list much of a chance -- the targets in this layout are roughly five times
+# the area, and every one of them shows what its thing is currently doing, so
+# most glances do not need a tap at all.
+#
+# ---------------------------------------------------------------------------
+# HOW TO OPT IN
+# ---------------------------------------------------------------------------
+#
+# Add a `dock_cards:` key to any page in your own dashboard.yaml, alongside its
+# existing `cards:`. Pages without one are completely unaffected, so you can
+# convert one room, live with it, and decide.
+#
+#   - name: Living Room
+#     cards: [ ... your existing list ... ]
+#     dock_cards: [ ... the block below ... ]
+#
+# ---------------------------------------------------------------------------
+# READ THIS BEFORE YOU PASTE IT
+# ---------------------------------------------------------------------------
+#
+# 1. `dock_cards` WINS whenever it is present. The page's own `cards:` list is
+#    then unreachable -- it is not a fallback and not a second tab. Anything
+#    you care about must appear in BOTH lists, or only in this one. This is the
+#    mistake to make once: convert a page, then discover a month later that a
+#    control you used twice a year is simply gone.
+#
+#    (It was originally cradle-only, hence the name -- it appeared on the
+#    charger and the card list returned in the hand. The big targets turned out
+#    to win in the hand too, so the power state no longer chooses.)
+#
+# 2. Do NOT add this as a new page. `startPage` is a positional index into
+#    `pages:`, so inserting a page silently moves every remote whose start page
+#    pointed past it -- which is the sort of bug you chase on the wrong device.
+#
+# 3. Every entity below is from the author's house. Replace them. The card
+#    subscribes only to entities your layout names, so a stale id costs you a
+#    blank tile rather than an error.
+#
+# ---------------------------------------------------------------------------
+# WHAT EACH TILE SHOWS
+# ---------------------------------------------------------------------------
+#
+# The menu NAME sits in a small grey caption; the live STATUS takes the main
+# line. That split is worth understanding before you tune it: with a single
+# line, a status of "Off" reads as the tile's name, so it has to be suppressed
+# -- and then every menu whose thing is off becomes an unlabelled icon you have
+# to recognise. Two lines lets a tile say "Off / LIGHTS" and mean it.
+#
+#   status_entity    the live value on the main line
+#   status_format    compose several values: "{current_temperature}°"
+#   status_big       large value BESIDE the icon (a room temperature); also
+#                    suppresses the caption, since two numbers already name it
+#   status_pills     outlined pills underneath; `color: heat` for the warm one
+#   index_status     a DIFFERENT source for the index tile only -- for a menu
+#                    whose status_entity means something else. Shades needs it:
+#                    there, status_entity is which shade you are aiming at,
+#                    which drives the submenu, while the index wants to know
+#                    whether the shades are open
+#   show_status      false keeps the NAME on the index and still feeds the
+#                    submenu from status_entity
+#   close_on_select  pop a level after a choice. Right for pick-one menus,
+#                    wrong for shades, where Stop follows Open
+#   corner           lift an item into the back row beside the lock: things
+#                    that QUALIFY the menu rather than being one of its choices
+#   visible_when     filtered before the grid is chunked, so it closes up
+#                    rather than leaving a hole
+#   card             render a normal card instead of a grid -- the thermostat
+#                    embeds `bubble_climate` with `inline: true`, because fixed
+#                    rungs cannot express a setpoint between them
+#
+# Swipe right anywhere on a submenu to go back; the level underneath slides in
+# behind the one leaving. Physical BACK does the same.
+#
+# ---------------------------------------------------------------------------
+# SUPPORTING TEMPLATE SENSORS
+# ---------------------------------------------------------------------------
+#
+# Two of the tiles below lean on template sensors rather than on an entity that
+# already exists. Both are in `homeassistant/templates-dock.yaml` in this repo,
+# with the reasoning; copy them into your own templates.yaml and rename.
+#
+#   binary_sensor.lr_dock_media_visible  is the now-playing strip showing
+#   sensor.lr_shade_summary              Open / Closed / Partial for a room
+#
+# ============================================================================
+
+  dock_cards:
+  # The SAME now-playing strip the in-hand page uses -- launcher and all.
+  # `dock_index_only` keeps it off the submenus, which need that height.
+  - type: conditional
+    options:
+      # Two gates, outer first: the SOURCE must not be Off. A player can sit in
+      # a stale 'paused' long after the system is down, and a now-playing row
+      # for a dark room is worse than none.
+      entity_id: input_select.lr_av_activity
+      state_not: 'Off'
+      dock_index_only: true
+      card:
+        type: conditional
+        options:
+          # ...and the player must actually have something on. The strip says
+          # "Nothing playing" rather than vanishing, which is right on the
+          # in-hand page and wrong on a dock that is otherwise all live status.
+          entity_id: media_player.living_room_apple_tv
+          state_in: ['playing', 'paused']
+          card:
+            type: media_player
+            options:
+              entity_id: media_player.living_room_apple_tv
+              variant: strip
+              art_size: 56
+              button_size: 60
+              # The launcher lives here now rather than on the Activity row: it
+              # belongs with what is playing, and this row is already about the
+              # Apple TV. target_from still points it at the latched multi-view pane.
+              launcher:
+                icon: apps
+                name: Apple TV
+                columns: 3
+                item_height: 64
+                item_font_size: 12
+                target_from: sensor.lr_key_target_media_player
+                items: !include atv_items_lr.yaml
+  - type: conditional
+    options:
+      # Two gates, outer first: the SOURCE must not be Off. A player can sit in
+      # a stale 'paused' long after the system is down, and a now-playing row
+      # for a dark room is worse than none.
+      entity_id: input_select.lr_av_activity
+      state_not: 'Off'
+      dock_index_only: true
+      card:
+        type: conditional
+        options:
+          # ...and the player must actually have something on. The strip says
+          # "Nothing playing" rather than vanishing, which is right on the
+          # in-hand page and wrong on a dock that is otherwise all live status.
+          entity_id: media_player.kaleidescape_strato_e
+          state_in: ['playing', 'paused']
+          card:
+            type: media_player
+            options:
+              entity_id: media_player.kaleidescape_strato_e
+              variant: strip
+              art_size: 56
+              button_size: 60
+              # The Kaleidescape's own launcher: the three browse views, the store,
+              # the menu, then the whole library alphabetically. Tapping a title
+              # plays it outright -- see script.kaleidescape_play_movie, and
+              # scripts/kaleidescape_library.py for where the list comes from
+              # (the server has no protocol enumeration, so it is scraped).
+              #
+              # 2 columns, not 3: these are long titles with years, not logos.
+              launcher:
+                icon: movie
+                name: Kaleidescape
+                # One per row: these are long titles with years, and 207 of them
+                # read as a list. As tiles they read as 207 buttons.
+                columns: 1
+                item_height: 44
+                item_font_size: 15
+                items: !include kscape_items.yaml
+              # CHAPTER skip, not scan. HA's kaleidescape integration whitelists
+              # only 11 zero-arg commands and chapter skip is not among them --
+              # scan_forward/scan_reverse are fast-forward/rewind. The real
+              # NEXT/PREVIOUS are top-level protocol commands, reached through
+              # scripts/kaleidescape_event.py (the same route the subtitle and
+              # audio-track actions use). `scan: false` gives them skip icons and
+              # stops them putting the card into its scanning state, which would
+              # otherwise flip the centre button to Play after a chapter jump.
+              reverse:
+                service: shell_command.kaleidescape_event
+                scan: false
+                data:
+                  event: PREVIOUS
+              forward:
+                service: shell_command.kaleidescape_event
+                scan: false
+                data:
+                  event: NEXT
+  - type: dock_menu
+    options:
+      columns: 2
+      # Two sizes, because the now-playing strip is not always there.
+      #
+      # 150dp is the CEILING for the solo case, derived not guessed: the
+      # LazyColumn is ~492dp tall (status bar to room-label strip) and carries
+      # 8dp of contentPadding top and bottom, leaving 476dp; three tiles plus
+      # two 10dp gaps means 3H + 20 <= 476, so H <= 152. 154 overflowed by 2dp,
+      # which is why the page scrolled "just barely". 150 keeps a 6dp buffer.
+      #
+      # 114dp is the measured fit WITH the strip (grid ran to y=688, room label
+      # at y=734). `compact_when` must mirror the conditional on the media card
+      # above -- PageContent lays cards out in a LazyColumn, so this card cannot
+      # measure its siblings and has to be told.
+      button_height: 150
+      button_height_compact: 106
+      # ONE definition, shared with the card that draws the strip -- see
+      # the note on binary_sensor.lr_dock_media_visible in templates.yaml. Keying
+      # this on the activity alone is what left the index using short
+      # tiles with no strip present.
+      compact_when:
+        entity_id: binary_sensor.lr_dock_media_visible
+        state: 'on'
+      menus:
+      - name: Activity
+        close_on_select: true
+        icon: tv
+        status_entity: input_select.lr_av_activity
+        # TV wall lock, on the back row. The lock enforcer bounces any activity
+        # chosen while this is on, so it belongs beside the activity buttons --
+        # otherwise a locked wall looks like the buttons are broken.
+        # Same three helpers the in-hand page's Watch separator uses, so the
+        # dock lock IS that lock: one tap to lock, PIN keypad to unlock, and HA
+        # (automation.tv_wall_validate_unlock_pin) does the comparing.
+        lock:
+          entity: input_boolean.tv_wall_locked
+          pin_entry: input_text.tv_wall_lock_pin_entry
+          pin_entity: input_text.tv_wall_lock_pin
+        items:
+        - {name: Apple TV, icon: tv, service: script.lr_av_watch_apple_tv, active_value: 'Watch Apple TV'}
+        - {name: Kaleidescape, icon: movie, service: script.lr_av_watch_kaleidescape, active_value: 'Watch Kaleidescape'}
+        - {name: Nintendo, icon: game, service: script.lr_av_play_switch, active_value: 'Play Switch'}
+        - {name: 'Off', icon: power, service: script.lr_av_off, active_value: 'Off'}
+        # Corner icons, in the back row beside the lock: these qualify WATCHING
+        # rather than being things to watch. Order here is the order shown.
+        - name: Brightness
+          corner: true
+          icon: brightness
+          status_entity: input_select.novastar_brightness_preset
+          items:
+          - {name: Auto, icon: brightness-auto, service: script.novastar_brightness_auto, active_value: 'Auto'}
+          - {name: Bright, icon: bright, service: script.novastar_brightness_bright, active_value: 'Bright'}
+          - {name: Normal, icon: brightness, service: script.novastar_brightness_normal, active_value: 'Normal'}
+          - {name: Dim, icon: dim, service: script.novastar_brightness_dim, active_value: 'Dim'}
+        - name: Screen Size
+          corner: true
+          icon: screen
+          status_entity: input_select.lr_screen_layout
+          items:
+          - {name: Full, icon: screen, service: script.lr_screen_full, active_value: 'Full'}
+          - {name: Compact, icon: aspect, service: script.lr_screen_compact, active_value: 'Compact'}
+          - {name: Multi, icon: apps, service: script.lr_screen_multi, active_value: 'Multi View'}
+          - name: Source 2
+            icon: source
+            status_entity: input_select.lr_mv_source_2
+            # Only meaningful in Multi View.
+            visible_when: {entity_id: input_select.lr_screen_layout, state: 'Multi View'}
+            # Top-right corner, like the lock: latching the remote's keys to
+            # this pane is a property OF the pane, not a fifth source.
+            action:
+              icon: remote
+              service: input_select.select_option
+              entity_id: input_select.lr_key_target
+              data: {option: 'Source 2'}
+              active_entity: input_select.lr_key_target
+              active_value: 'Source 2'
+            items:
+            - {name: 'Off', icon: power, service: input_select.select_option, entity_id: input_select.lr_mv_source_2, data: {option: 'Off'}, active_value: 'Off'}
+            - {name: 'Apple TV 2', icon: tv, service: input_select.select_option, entity_id: input_select.lr_mv_source_2, data: {option: 'ATV2'}, active_value: 'ATV2'}
+            - {name: 'Apple TV 3', icon: tv, service: input_select.select_option, entity_id: input_select.lr_mv_source_2, data: {option: 'ATV3'}, active_value: 'ATV3'}
+            - {name: 'Kaleidescape', icon: movie, service: input_select.select_option, entity_id: input_select.lr_mv_source_2, data: {option: 'KScape'}, active_value: 'KScape'}
+          - name: Source 3
+            icon: source
+            status_entity: input_select.lr_mv_source_3
+            # Only meaningful in Multi View.
+            visible_when: {entity_id: input_select.lr_screen_layout, state: 'Multi View'}
+            # Top-right corner, like the lock: latching the remote's keys to
+            # this pane is a property OF the pane, not a fifth source.
+            action:
+              icon: remote
+              service: input_select.select_option
+              entity_id: input_select.lr_key_target
+              data: {option: 'Source 3'}
+              active_entity: input_select.lr_key_target
+              active_value: 'Source 3'
+            items:
+            - {name: 'Off', icon: power, service: input_select.select_option, entity_id: input_select.lr_mv_source_3, data: {option: 'Off'}, active_value: 'Off'}
+            - {name: 'Apple TV 2', icon: tv, service: input_select.select_option, entity_id: input_select.lr_mv_source_3, data: {option: 'ATV2'}, active_value: 'ATV2'}
+            - {name: 'Apple TV 3', icon: tv, service: input_select.select_option, entity_id: input_select.lr_mv_source_3, data: {option: 'ATV3'}, active_value: 'ATV3'}
+            - {name: 'Kaleidescape', icon: movie, service: input_select.select_option, entity_id: input_select.lr_mv_source_3, data: {option: 'KScape'}, active_value: 'KScape'}
+          - name: Source 4
+            icon: source
+            status_entity: input_select.lr_mv_source_4
+            # Only meaningful in Multi View.
+            visible_when: {entity_id: input_select.lr_screen_layout, state: 'Multi View'}
+            # Top-right corner, like the lock: latching the remote's keys to
+            # this pane is a property OF the pane, not a fifth source.
+            action:
+              icon: remote
+              service: input_select.select_option
+              entity_id: input_select.lr_key_target
+              data: {option: 'Source 4'}
+              active_entity: input_select.lr_key_target
+              active_value: 'Source 4'
+            items:
+            - {name: 'Off', icon: power, service: input_select.select_option, entity_id: input_select.lr_mv_source_4, data: {option: 'Off'}, active_value: 'Off'}
+            - {name: 'Apple TV 2', icon: tv, service: input_select.select_option, entity_id: input_select.lr_mv_source_4, data: {option: 'ATV2'}, active_value: 'ATV2'}
+            - {name: 'Apple TV 3', icon: tv, service: input_select.select_option, entity_id: input_select.lr_mv_source_4, data: {option: 'ATV3'}, active_value: 'ATV3'}
+            - {name: 'Kaleidescape', icon: movie, service: input_select.select_option, entity_id: input_select.lr_mv_source_4, data: {option: 'KScape'}, active_value: 'KScape'}
+      - name: Lights
+        close_on_select: true
+        icon: light
+        status_entity: input_select.living_room_active_scene
+        items:
+        - {name: Bright, icon: bright, service: script.lr_lights_bright}
+        - {name: Entertain, icon: entertain, service: script.lr_lights_entertain}
+        - {name: Relax, icon: relax, service: script.lr_lights_relax}
+        - {name: Movie, icon: movie, service: script.lr_lights_movie}
+        - {name: 'Off', icon: power, service: script.lr_lights_off}
+      # Acts on whatever input_select.lr_shade_target is set to (default
+      # "All Shades"), the same as the in-hand shade control -- NOT a
+      # separate all-shades path that could drift from it.
+      - name: Shades
+        icon: shade
+        # status_entity is the TARGET, because the nested "Which shades" tile and
+        # its highlight are driven from it. The INDEX wants something else --
+        # whether the shades are actually open -- so it gets its own source, and
+        # the name drops to the grey caption like every other tile.
+        status_entity: input_select.lr_shade_target
+        index_status:
+          status_entity: sensor.lr_shade_summary
+        items:
+        - {name: Open, icon: open, service: script.lr_shade_target_open}
+        - {name: Close, icon: close, service: script.lr_shade_target_close}
+        - {name: Stop, icon: stop, service: script.lr_shade_target_stop}
+        - name: Which shades
+          icon: shade
+          # Labelled with the CURRENT target rather than "Which shades", so the
+          # tile answers the question instead of asking it. Choosing one closes
+          # this level and returns to Shades, where Open/Close/Stop are waiting.
+          status_entity: input_select.lr_shade_target
+          close_on_select: true
+          items:
+          - {name: 'All Shades', icon: shades, service: input_select.select_option, entity_id: input_select.lr_shade_target, data: {option: 'All Shades'}, active_value: 'All Shades'}
+          - {name: 'North', icon: north, service: input_select.select_option, entity_id: input_select.lr_shade_target, data: {option: 'North'}, active_value: 'North'}
+          - {name: 'Left', icon: left, service: input_select.select_option, entity_id: input_select.lr_shade_target, data: {option: 'Left'}, active_value: 'Left'}
+          - {name: 'Center', icon: center, service: input_select.select_option, entity_id: input_select.lr_shade_target, data: {option: 'Center'}, active_value: 'Center'}
+          - {name: 'Right', icon: right, service: input_select.select_option, entity_id: input_select.lr_shade_target, data: {option: 'Right'}, active_value: 'Right'}
+      - name: Climate
+        icon: climate
+        # Current temperature large, setpoints as coloured pills beneath:
+        # BLUE is the cool setpoint, ORANGE the heat one. In Auto a
+        # thermostat has both, so both are drawn. The single-mode entries
+        # carry a `state` because they differ only by colour -- the same
+        # number is blue when cooling and orange when heating. The Auto
+        # pair needs no condition: low/high are null outside heat_cool and
+        # an unresolvable pill is simply skipped.
+        status_entity: climate.living_room
+        status_big: "{current_temperature}\u00B0"
+        status_pills:
+        - {format: "{temperature}\u00B0", color: cool, state: cool}
+        - {format: "{temperature}\u00B0", color: heat, state: heat}
+        - {format: "{target_temp_low}\u00B0", color: heat}
+        - {format: "{target_temp_high}\u00B0", color: cool}
+        modes:
+          entity_id: climate.living_room
+          options:
+          - {name: Cool, icon: cool, service: climate.set_hvac_mode, entity_id: climate.living_room, data: {hvac_mode: 'cool'}, active_value: 'cool'}
+          - {name: Heat, icon: heat, service: climate.set_hvac_mode, entity_id: climate.living_room, data: {hvac_mode: 'heat'}, active_value: 'heat'}
+          - {name: Auto, icon: auto-mode, service: climate.set_hvac_mode, entity_id: climate.living_room, data: {hvac_mode: 'heat_cool'}, active_value: 'heat_cool'}
+          - {name: 'Off', icon: power, service: climate.set_hvac_mode, entity_id: climate.living_room, data: {hvac_mode: 'off'}, active_value: 'off'}
+        # The in-hand page's own climate card, embedded: rollable temperature,
+        # +/- steppers, both bounds in Auto, and the hold shown inline with its
+        # clear button -- all of which a grid of fixed setpoints could not do.
+        card:
+          type: bubble_climate
+          options:
+            entity_id: climate.living_room
+            step: 1
+            # The picker IS the page here; a modal inside a page is a
+            # second layer to dismiss for nothing.
+            inline: true
+            hold_entity: binary_sensor.living_room_holding
+            clear_hold:
+              service: button.press
+              entity_id: button.living_room_clear_hold
+        items: []
+      - name: Fan
+        close_on_select: true
+        icon: fan
+        status_entity: fan.living_room_ceiling_fan
+        status_attribute: percentage
+        status_from_items: true
+        items:
+        - {name: Fast, icon: speed-high, service: fan.set_percentage, entity_id: fan.living_room_ceiling_fan, data: {percentage: 100}}
+        - {name: Medium, icon: speed-medium, service: fan.set_percentage, entity_id: fan.living_room_ceiling_fan, data: {percentage: 67}}
+        - {name: Low, icon: speed-low, service: fan.set_percentage, entity_id: fan.living_room_ceiling_fan, data: {percentage: 33}}

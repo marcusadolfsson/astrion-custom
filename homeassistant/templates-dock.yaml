@@ -1,0 +1,58 @@
+# ============================================================================
+# Template sensors for the optional dock layout (examples/dashboard-dock.yaml)
+# ============================================================================
+#
+# Copy into your own templates.yaml and rename for your rooms. Neither is
+# required to use the layout -- drop the tile options that reference them and
+# the rest works -- but both exist for a reason worth reading.
+
+# ---------------------------------------------------------------------------
+# Is the now-playing strip showing?
+# ---------------------------------------------------------------------------
+# TWO consumers have to agree on this: the `conditional` that draws the strip,
+# and the dock_menu's `compact_when`, which shrinks the tiles to make room for
+# it. They were stated separately once and drifted -- the card gained a
+# player-state gate while compact_when still keyed on the activity alone, so
+# the index used SHORT tiles with no strip present and left a strip-sized hole
+# in the page.
+#
+# A card cannot measure its siblings here (they are laid out in a LazyColumn,
+# where vertical space is unbounded), so the two consumers cannot discover the
+# answer themselves. They have to be told the same thing, and this is it.
+#
+# Note the outer gate. A player can sit in a stale 'paused' for hours after the
+# system is off, and a now-playing row for a dark room is worse than none.
+- binary_sensor:
+  - name: "LR Dock Media Visible"
+    unique_id: lr_dock_media_visible
+    state: >-
+      {{ states('input_select.lr_av_activity') not in ['Off','unknown','unavailable']
+         and (states('media_player.living_room_apple_tv') in ['playing','paused']
+              or states('media_player.kaleidescape_strato_e') in ['playing','paused']) }}
+
+# ---------------------------------------------------------------------------
+# One word for a whole room's shades
+# ---------------------------------------------------------------------------
+# If your covers report real state, you do not need this -- point
+# `index_status` straight at a cover or a cover group.
+#
+# This exists because the author's shades are Bond, which is one-way RF: Home
+# Assistant sends and hears nothing back, so the cover entity has no real
+# state. The position helpers the shade scripts write ARE the state. Adapt the
+# entity list; keep the shape.
+#
+# Three outcomes, not two. A room whose shades disagree is the normal case when
+# there are four of them, and reporting that as either Open or Closed would be
+# a confident lie on the one tile you read from across the room.
+- sensor:
+  - name: "LR Shade Summary"
+    unique_id: lr_shade_summary
+    state: >-
+      {% set p = ['input_select.living_room_shade_left_position',
+                  'input_select.living_room_shade_center_position',
+                  'input_select.living_room_shade_right_position',
+                  'input_select.living_room_shade_north_position']
+                 | map('states') | list %}
+      {% if p | select('eq','open') | list | count == p | count %}Open
+      {% elif p | select('eq','closed') | list | count == p | count %}Closed
+      {% else %}Partial{% endif %}

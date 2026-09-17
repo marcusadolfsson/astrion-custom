@@ -171,6 +171,11 @@ A 2-wide grid of large buttons, each opening a submenu of equally large buttons.
 for a remote sitting in its cradle across the room, where a dense scrolling list is
 unusable -- but it turned out to win in the hand too, so it is simply the view now.
 
+**Opt-in, per page.** A page without `dock_cards:` renders exactly as before, so a
+layout can be converted one room at a time. A ready-made example is in
+`examples/dashboard-dock.yaml`, and the two template sensors it leans on are in
+`homeassistant/templates-dock.yaml`.
+
 It is enabled by a second card list on a page, **not** by a page of its own:
 
 ```yaml

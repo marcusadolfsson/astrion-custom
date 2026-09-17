@@ -85,6 +85,26 @@ document is unchanged — only `ui:` differs.
 The layout behind these shots is [`examples/dashboard.yaml`](examples/dashboard.yaml)
 — a real, in-use configuration rather than a toy one.
 
+### Optional: bigger touch points
+
+![Dock index](examples/screenshots/23-dock-index.png)
+![Dock activity](examples/screenshots/24-dock-activity.png)
+
+A 3" screen at arm's length does not give a scrolling card list much of a
+chance. Adding a `dock_cards:` key to a page renders it as a 2-wide grid of
+large buttons instead — roughly five times the target area, each one showing
+what its thing is currently doing, so most glances need no tap at all. Tapping
+one opens a submenu of equally large buttons; swipe right to come back.
+
+It is per page and entirely opt-in: a page without `dock_cards:` is unchanged,
+so you can convert one room and live with it before deciding. **But where it is
+present it wins outright** — that page's own `cards:` list becomes unreachable
+rather than acting as a fallback, so anything you still want must appear in the
+new list too.
+
+Layout: [`examples/dashboard-dock.yaml`](examples/dashboard-dock.yaml).
+Supporting template sensors: [`homeassistant/templates-dock.yaml`](homeassistant/templates-dock.yaml).
+
 ---
 
 ## What this fork changes
@@ -95,7 +115,7 @@ layout) is unchanged. Each item below landed as its own commit.
 | Area | Change |
 |---|---|
 | **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional`, `dpad`, `dock_menu` |
-| **Dock view** | `dock_cards:` renders a page as a 2-wide grid of large buttons with live state on every tile, nested menus, and swipe-right-to-go-back that reveals the level underneath |
+| **Big-touch layout** | *optional* — add `dock_cards:` to a page and it renders as a 2-wide grid of large buttons with live state on every tile, nested menus, and swipe-right-to-go-back. Pages without it are unchanged. See [`examples/dashboard-dock.yaml`](examples/dashboard-dock.yaml) |
 | **Changed cards** | `bubble_climate` rebuilt (hold indicator, mode + dual setpoints, scrolling picker), brightness sliders and a radio latch button inside `bubble_select`, `media_player` transport rework + auto-collapse + stale-metadata guard, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
 | **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
 | **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, a device panel, per-remote start page, tilt-based motion wake and dock display |

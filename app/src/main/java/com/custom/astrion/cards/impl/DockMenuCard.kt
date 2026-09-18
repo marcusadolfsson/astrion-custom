@@ -10,6 +10,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +31,7 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -159,6 +164,10 @@ class DockMenuCard : CardRenderer {
         // unbounded and `weight` cannot claim what is left. Keep the two in sync.
         val tall = config.int("button_height", 128)
         val compactH = config.int("button_height_compact", tall)
+        // Stands in for the now-playing header on a submenu, so both levels put
+        // their first row of buttons on the same line. Default matches the
+        // header's own height.
+        val band = config.int("back_band_height", 76)
         @Suppress("UNCHECKED_CAST")
         val cw = config.options["compact_when"] as? Map<String, Any?>
         val compact = cw != null && run {
@@ -181,9 +190,14 @@ class DockMenuCard : CardRenderer {
         // Submenus never show the now-playing strip (it is `dock_index_only`),
         // so they always get the full-height tiles.
         if (node == null) {
-            IndexGrid(menus, columns, if (compact) compactH else tall, ctx)
+            // Always fills now. The gate used to be "only when the header is
+            // there", because without it the configured height already reached
+            // the bottom of the page. Moving the room indicator into the status
+            // bar removed the whole bottom bar, so there is slack in BOTH cases
+            // and a fixed height would leave a dead strip under the last row.
+            IndexGrid(menus, columns, if (compact) compactH else tall, fill = true, ctx)
         } else {
-            SubGrid(node, level, columns, tall, ctx)
+            SubGrid(node, level, columns, tall, band, ctx)
         }
     }
 
@@ -194,10 +208,26 @@ class DockMenuCard : CardRenderer {
         menus: List<Map<String, Any?>>,
         columns: Int,
         height: Int,
+        /** Divide the page height between the rows instead of using [height]. */
+        fill: Boolean,
         ctx: CardContext,
     ) {
+        val rows = menus.chunked(columns)
+        // Stretch ONLY when the header is showing.
+        //
+        // The header is what makes the index short: with a now-playing row above
+        // it the three tile rows no longer reach the bottom, and the leftover
+        // strip is worth giving back to the buttons. With no header there is
+        // nothing to absorb -- the configured height already fills the page --
+        // and stretching would just inflate the tiles for their own sake.
+        //
+        // `fill` comes from the same `compact_when` that used to pick the
+        // shorter fixed height, so the two can never disagree about whether the
+        // header is there.
+        BoxWithConstraints(modifier = if (fill) Modifier.fillMaxSize() else Modifier.fillMaxWidth()) {
+        val tileH = if (fill) rowHeight(maxHeight, 10.dp, rows.size, height) else height
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            menus.chunked(columns).forEach { row ->
+            rows.forEach { row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -236,7 +266,7 @@ class DockMenuCard : CardRenderer {
                             Tile(
                                 label = label,
                                 icon = m["icon"] as? String ?: name,
-                                height = height,
+                                height = tileH,
                                 modifier = Modifier.weight(1f),
                                 // Thermostat layout: CURRENT temperature big
                                 // beside the icon, setpoint in a pill beneath.
@@ -261,6 +291,7 @@ class DockMenuCard : CardRenderer {
                 }
             }
         }
+        }
     }
 
     // ---- submenu, any depth ------------------------------------------------
@@ -271,10 +302,34 @@ class DockMenuCard : CardRenderer {
         items: List<Map<String, Any?>>,
         columns: Int,
         height: Int,
+        /** Height of the back-bar band; see [BackBar]. */
+        bandHeight: Int,
         ctx: CardContext,
     ) {
         val active = statusOf(node, ctx, useFormat = false)
         val closeOnSelect = node["close_on_select"] == true
+
+        // `on_leave`: a service call fired when this menu stops being shown --
+        // Back, a back-swipe, a room swipe, the screensaver, any of them. It is
+        // for state that should not outlive the page that set it. The
+        // multi-view panes use it to hand the keys back to the primary source:
+        // aiming them at a pane is a decision you make while looking at that
+        // pane, and a latch that quietly survives your leaving is the failure
+        // automation.lr_key_target_autoclear exists to mop up.
+        //
+        // Deliberately skipped on the back-swipe PREVIEW layer. That layer is a
+        // second composition of this card at a different path, and it appears
+        // and disappears as a side effect of a gesture -- firing real service
+        // calls from it would mean a cancelled swipe had already changed
+        // something.
+        @Suppress("UNCHECKED_CAST")
+        val onLeave = node["on_leave"] as? Map<String, Any?>
+        val isPreview = LocalDockPath.current != null
+        if (onLeave != null && !isPreview) {
+            DisposableEffect(node["name"]) {
+                onDispose { fire(ctx, onLeave) }
+            }
+        }
         // `visible_when` hides an item until its entity says it is relevant --
         // Resume only appears while the thermostat is actually holding. Filtered
         // before chunking so the grid closes up rather than leaving a hole.
@@ -324,11 +379,17 @@ class DockMenuCard : CardRenderer {
                 format(node["header_format"] as? String, node["status_entity"] as? String, ctx),
                 node["action"] as? Map<String, Any?>,
                 corners,
+                bandHeight,
                 ctx,
             ) { DockMenuState.path = DockMenuState.path.dropLast(1) }
             if (embedded != null) {
                 CardRegistry.get(embedded.type)?.Render(embedded, ctx)
             }
+            // Fixed height, NOT stretched. A submenu is a list of choices, and
+            // stretching four of them over a whole screen makes each one a slab
+            // -- bigger is not better past the point where the button is already
+            // comfortably larger than a thumb. Only the index stretches, and
+            // only to absorb the header; see IndexGrid.
             items.chunked(columns).forEach { row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -460,6 +521,24 @@ class DockMenuCard : CardRenderer {
      * the attribute.
      */
     @Suppress("UNCHECKED_CAST")
+    /**
+     * Row height that divides the space actually available between [rowCount]
+     * rows, falling back to [fallback] when there is no bound to divide.
+     *
+     * The fallback is not decoration. A card inside a LazyColumn is measured
+     * with an INFINITE height constraint -- the list scrolls, so there is no
+     * "remaining" for a child to fill -- and asking for a share of infinity
+     * gives a tile the size of the universe. The dock page renders its single
+     * card in a plain Column instead, which is what makes the bound exist. Any
+     * other host still gets the configured height.
+     */
+    private fun rowHeight(available: Dp, gap: Dp, rowCount: Int, fallback: Int): Int {
+        if (rowCount <= 0) return fallback
+        if (!available.value.isFinite() || available <= 0.dp) return fallback
+        val each = (available - gap * (rowCount - 1)) / rowCount
+        return each.value.toInt().coerceAtLeast(56)
+    }
+
     private fun statusOf(
         m: Map<String, Any?>,
         ctx: CardContext,
@@ -532,6 +611,18 @@ class DockMenuCard : CardRenderer {
         header: String?,
         action: Map<String, Any?>?,
         corners: List<Map<String, Any?>>,
+        /**
+         * Fixed band height, so a submenu's grid begins at the same y as the
+         * index's.
+         *
+         * Sized to stand in for the now-playing header rather than to fit the
+         * back pill. Wrapping the pill put the first row of a submenu 42px
+         * higher than the first row of the index, so every drill-in shifted the
+         * whole grid up and back down again -- and it left the pill and the
+         * round corner buttons crowded against the status bar with nothing
+         * around them.
+         */
+        bandHeight: Int,
         ctx: CardContext,
         onBack: () -> Unit,
     ) {
@@ -541,7 +632,7 @@ class DockMenuCard : CardRenderer {
         // greyed.
         val (press, click) = rememberPressFeedback(latch = false, onClick = onBack)
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = bandHeight.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
@@ -872,9 +963,19 @@ class DockMenuCard : CardRenderer {
                         modifier = Modifier.size((height * 0.386f).coerceIn(28f, 72f).dp),
                     )
                 }
-                // Value and name are ONE block with a tight gap, not two items
-                // in the 8dp stack above -- at that spacing they read as two
-                // unrelated lines rather than as a thing and its label.
+                // Emitted only when it has something in it.
+                //
+                // `spacedBy` puts a gap BEFORE every child after the first,
+                // including one that measures zero. A thermostat tile suppresses
+                // both the label and the caption, so this Column was an empty
+                // third child adding 8dp of space below the pills -- and the
+                // Box centres the whole stack, so the part you can actually see
+                // sat 4dp high. Next to tiles whose content is genuinely
+                // centred, that reads as the climate tile being misaligned,
+                // which it was.
+                val showLabel = label.isNotEmpty() && bigValue == null
+                val showCaption = caption != null && caption.isNotBlank() && bigValue == null
+                if (showLabel || showCaption) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(1.dp),
@@ -882,7 +983,7 @@ class DockMenuCard : CardRenderer {
                     // `bigValue` replaces the plain label rather than joining it
                     // -- otherwise the thermostat tile renders the temperature
                     // three times (big, pill, and again as the status line).
-                    if (label.isNotEmpty() && bigValue == null) {
+                    if (showLabel) {
                         Text(
                             label,
                             color = if (selected) Color.White else Color(0xFFE6F0F1),
@@ -900,9 +1001,9 @@ class DockMenuCard : CardRenderer {
                     // setpoint pill; adding the word CLIMATE under them names
                     // something the two numbers have already introduced, and
                     // three stacked elements make one tile look like several.
-                    if (caption != null && caption.isNotBlank() && bigValue == null) {
+                    if (showCaption) {
                         Text(
-                            caption.uppercase(),
+                            caption!!.uppercase(),
                             // Deliberately quiet: it is the one thing on the tile
                             // that never changes, so it should be the last thing
                             // the eye stops on. Letter-spacing is what keeps it
@@ -916,6 +1017,7 @@ class DockMenuCard : CardRenderer {
                             modifier = Modifier.padding(horizontal = 4.dp),
                         )
                     }
+                }
                 }
             }
         }

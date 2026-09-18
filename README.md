@@ -88,7 +88,7 @@ The layout behind these shots is [`examples/dashboard.yaml`](examples/dashboard.
 ### Optional: bigger touch points
 
 ![Dock index](examples/screenshots/23-dock-index.png)
-![Dock activity](examples/screenshots/24-dock-activity.png)
+![Dock climate](examples/screenshots/26-dock-climate.png)
 
 A 3" screen at arm's length does not give a scrolling card list much of a
 chance. Adding a `dock_cards:` key to a page renders it as a 2-wide grid of
@@ -102,6 +102,23 @@ present it wins outright** — that page's own `cards:` list becomes unreachable
 rather than acting as a fallback, so anything you still want must appear in the
 new list too.
 
+**Nothing on the page moves.** That turned out to be the hard part, and most of
+the design follows from it:
+
+- The top band is **reserved whether or not anything is playing**, so the
+  buttons sit in the same place in a silent room as in a loud one. What is
+  playing goes in that band, with the clock and battery drawn over it; when
+  nothing is, a `weather_header` fills it.
+- A submenu is drawn **over** the index, not in place of it. The index stays
+  mounted and unmoved underneath, so backing out uncovers it rather than
+  rebuilding it — and the now-playing header cannot snap into view, because it
+  never left.
+- A now-playing title is one line with a marquee rather than wrapping, which is
+  what makes that band the same height across sources: one publishes a bare
+  title, another a long title *and* an app name it uses as a subtitle.
+
+![Dock weather header](examples/screenshots/28-dock-weather.png)
+
 Layout: [`examples/dashboard-dock.yaml`](examples/dashboard-dock.yaml).
 Supporting template sensors: [`homeassistant/templates-dock.yaml`](homeassistant/templates-dock.yaml).
 
@@ -114,7 +131,7 @@ layout) is unchanged. Each item below landed as its own commit.
 
 | Area | Change |
 |---|---|
-| **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional`, `dpad`, `dock_menu` |
+| **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional`, `dpad`, `dock_menu`, `weather_header` |
 | **Big-touch layout** | *optional* — add `dock_cards:` to a page and it renders as a 2-wide grid of large buttons with live state on every tile, nested menus, and swipe-right-to-go-back. Pages without it are unchanged. See [`examples/dashboard-dock.yaml`](examples/dashboard-dock.yaml) |
 | **Changed cards** | `bubble_climate` rebuilt (hold indicator, mode + dual setpoints, scrolling picker), brightness sliders and a radio latch button inside `bubble_select`, `media_player` transport rework + auto-collapse + stale-metadata guard, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
 | **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
@@ -183,7 +200,7 @@ a toolchain — but **adding a brand-new card type means compiling** (see
 **Option A — prebuilt release** (signed, minified, ~1.4 MB):
 
 ```sh
-adb install releases/astrion-custom-1.23.0.apk
+adb install releases/astrion-custom-1.31.1.apk
 ```
 
 **Option B — build from source.** You need:

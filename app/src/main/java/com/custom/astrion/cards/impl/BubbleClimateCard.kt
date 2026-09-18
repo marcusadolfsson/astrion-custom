@@ -33,6 +33,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -798,13 +799,50 @@ class BubbleClimateCard : CardRenderer {
                         Text(
                             fmt(v),
                             color = if (selected) Color.White else Color(0xFF7E97A1),
-                            fontSize = if (selected) 32.sp else 22.sp,
-                            fontWeight = FontWeight.Light,
+                            fontSize = if (selected) 36.sp else 24.sp,
+                            // Bold on the selection, medium elsewhere. Light
+                            // read as a caption at this size -- thin strokes on
+                            // a small dark panel, on a screen looked at from
+                            // across a room. This is the number you are here to
+                            // set; it should be the heaviest thing on the page.
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                             textAlign = TextAlign.Center,
                         )
                     }
                 }
             }
+            // Fades at both ends, so the numbers appear to roll under an edge
+            // rather than being clipped by a rectangle. Drawn LAST, over the
+            // list, and non-interactive -- a gradient that ate touches would
+            // make the top and bottom thirds of the dial undraggable.
+            //
+            // The colour is the page background, not a translucent black: this
+            // sits directly on the page now that the inline picker has no panel
+            // behind it, and black-over-dark greys the numbers instead of
+            // dissolving them.
+            val fade = itemH * 1.4f
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(fade)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF0E2229), Color(0x000E2229)),
+                        )
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(fade)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0x000E2229), Color(0xFF0E2229)),
+                        )
+                    )
+            )
         }
     }
 

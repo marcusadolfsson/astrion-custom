@@ -7,7 +7,7 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import com.custom.astrion.DockPower
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -50,6 +50,15 @@ import java.util.Locale
 fun StatusBar(
     is24Hour: Boolean = false,
     onSwipeDown: (() -> Unit)? = null,
+    /**
+     * Drawn between the clock and the battery.
+     *
+     * The room name and page dots live here rather than on a bar of their own at
+     * the bottom. That bar was a whole row spent on a label that changes when you
+     * swipe and is otherwise static, on the screen whose entire problem is
+     * height -- and this row already had dead space across its middle.
+     */
+    center: @Composable () -> Unit = {},
 ) {
     val context = LocalContext.current
 
@@ -120,7 +129,6 @@ fun StatusBar(
             // they label rather than floating between the two.
             .heightIn(min = 46.dp)
             .padding(start = 14.dp, end = 14.dp, top = 9.dp, bottom = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -128,6 +136,14 @@ fun StatusBar(
             color = Color(0xFF93AFB6),
             fontSize = 15.sp,
         )
+        // Weighted, so the centre content is centred on the SCREEN rather than
+        // on whatever gap the clock and battery happen to leave. Those two
+        // differ in width (and the battery changes width as it discharges), so
+        // SpaceBetween would drift the room name left and right as the day went on.
+        Box(
+            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) { center() }
         Text(
             text = when {
                 batteryPct < 0 -> ""

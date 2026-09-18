@@ -72,6 +72,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.custom.astrion.BuildConfig
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.custom.astrion.cards.CardConfig
@@ -299,10 +300,66 @@ fun Dashboard(
             // is per-device; the status bar had an is24Hour parameter that nothing
             // ever passed, so it stayed 12-hour while the idle clock went 24-hour
             // and the same remote showed both formats.
-            StatusBar(
-                onSwipeDown = config.gestures?.swipeDown?.let { { onSettingsOpen(true) } },
-                is24Hour = config.screensaver.forDevice(deviceName).clock24h,
-            )
+            // The page's header card, with the clock and battery ON TOP of it.
+            //
+            // A dock card marked `dock_header: true` is hoisted out of the
+            // scrolling list and drawn here instead. Nothing else changes about
+            // it -- it is an ordinary card, conditionals and all -- but it now
+            // occupies the band the status bar used to have to itself.
+            //
+            // Why a Box rather than a taller StatusBar: the card decides its own
+            // height, and the box takes the larger of the two. So when the card
+            // is hidden (its conditional not matching, or the page having no
+            // header card at all) this collapses to exactly the status bar that
+            // was always here, with no empty band left behind. That is also why
+            // the status bar keeps its own minimum height -- it is the floor.
+            // ALL of them, not the first: the Living Room has one now-playing
+            // row per source, each gated on its own player, and taking only the
+            // first would have permanently hidden the Kaleidescape's. They are
+            // conditionals, so at most one draws; if two ever matched, stacking
+            // them is the honest outcome rather than silently dropping one.
+            // Index only. A submenu is a full grid of its own and wants every
+            // row it can get -- which was the original reason the now-playing
+            // strip carried `dock_index_only`. Moving it into the header made it
+            // cheap enough to leave on everywhere, but cheap is not free: it
+            // still costs a submenu the band, and you are looking at a menu, not
+            // at what is playing.
+            // Index only.
+            //
+            // It was briefly shown during a back-swipe as well, so the player
+            // would not appear to load late. That was the wrong fix for the
+            // right complaint: this Box is ABOVE the pager, so revealing it
+            // mid-gesture shrinks the page area and shoves the submenu that is
+            // sliding away down by the band height. A layout jump during a drag
+            // is worse than a header that arrives at the end of one.
+            //
+            // The complaint itself is answered elsewhere: the artwork is cached
+            // now (see ArtCache in MediaPlayerCard), so the header that appears
+            // on commit is drawn complete in its first frame rather than
+            // fetching a poster you then watch arrive.
+            // Always. The page underneath is ALWAYS the index now -- a submenu
+            // is an overlay drawn on top of it (see DockSubmenuOverlay), not a
+            // different thing rendered in its place. So the header is never
+            // unmounted, and swiping a submenu away uncovers a header that was
+            // there the whole time instead of snapping one into existence.
+            val headerCards = config.pages.getOrNull(pagerState.currentPage)
+                ?.dockCards?.filter { it.options["dock_header"] == true }.orEmpty()
+            // A FIXED band on the index, whether or not anything is playing.
+            //
+            // The buttons are positioned from the bottom of this, so letting it
+            // collapse when the room is off moved the entire grid up -- the same
+            // six tiles in two different places depending on whether music
+            // happened to be on. Reserving the space costs a strip of background
+            // in the quiet case and buys a layout that never moves.
+            //
+            // The status bar is NOT in here any more -- it is drawn at the root,
+            // above the submenu overlay, so the clock stays readable while a
+            // submenu covers everything else.
+            Box(modifier = Modifier.fillMaxWidth().height(HEADER_BAND)) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    headerCards.forEach { RenderCard(it, ctx) }
+                }
+            }
             ConnectionBanner(connection)
             if (configNotice != null) ConfigNoticeBanner(configNotice)
 
@@ -323,29 +380,60 @@ fun Dashboard(
             ) { pageIndex ->
                 // Only the settled/current page acts on a scroll request; other
                 // (pre-composed) pages get null so they don't consume it early.
-                PageContent(
-                    config.pages[pageIndex],
-                    ctx,
-                    if (pageIndex == pagerState.currentPage) scrollTarget else null,
-                    onScrollHandled,
-                    docked = docked,
-                    columns = config.ui.columns,
-                )
+                // Forced to the INDEX. A submenu is an overlay now, so the
+                // page beneath it never changes -- which is the whole point:
+                // nothing under the overlay moves, appears or disappears while
+                // you are in a menu, so backing out reveals rather than rebuilds.
+                CompositionLocalProvider(
+                    com.custom.astrion.cards.impl.LocalDockPath provides emptyList()
+                ) {
+                    PageContent(
+                        config.pages[pageIndex],
+                        ctx,
+                        if (pageIndex == pagerState.currentPage) scrollTarget else null,
+                        onScrollHandled,
+                        docked = docked,
+                        columns = config.ui.columns,
+                    )
+                }
             }
 
-            // The dots ARE the room selector, so they are hidden while a dock
-            // submenu is open: that strip is the row a submenu needs for its
-            // sixth button, and picking a room is not what you are doing
-            // mid-submenu. The top-level dock grid keeps them.
-            if (!com.custom.astrion.cards.impl.DockMenuState.inSubmenu) {
-                PageIndicator(
-                    pages = config.pages,
-                    current = pagerState.currentPage,
-                    onDotClick = { i -> scope.launch { pagerState.animateScrollToPage(i) } },
-                    onOpenPanel = { onSettingsOpen(true) },
-                )
-            }
+            // The bottom bar is GONE. The room name and dots moved into the
+            // status bar's middle, which was empty, so the whole row it used to
+            // occupy goes to the buttons instead.
         }
+
+        // The submenu, drawn OVER the index instead of in place of it.
+        //
+        // Order matters here: this comes after the Column, so it covers the
+        // header band and the grid; the status bar comes after IT, so the clock
+        // stays readable. Backing out slides this aside and what appears
+        // underneath is the index exactly as it was left -- header included,
+        // nothing remounted, nothing re-measured.
+        val submenuPage = config.pages.getOrNull(pagerState.currentPage)
+        if (com.custom.astrion.cards.impl.DockMenuState.inSubmenu &&
+            submenuPage != null && submenuPage.dockCards.isNotEmpty()) {
+            DockSubmenuOverlay(submenuPage, ctx)
+        }
+
+        StatusBar(
+            onSwipeDown = config.gestures?.swipeDown?.let { { onSettingsOpen(true) } },
+            is24Hour = config.screensaver.forDevice(deviceName).clock24h,
+            center = {
+                // Hidden inside a submenu: you are not choosing a room there,
+                // and the back pill already says where you are.
+                if (!com.custom.astrion.cards.impl.DockMenuState.inSubmenu) {
+                    RoomIndicator(
+                        pages = config.pages,
+                        current = pagerState.currentPage,
+                        onDotClick = { i ->
+                            scope.launch { pagerState.animateScrollToPage(i) }
+                        },
+                        onOpenPanel = { onSettingsOpen(true) },
+                    )
+                }
+            },
+        )
 
         // Page-effective, for the same reason the voice config below is: the
         // volume keys are page-scoped, so on the bedroom page they move the
@@ -872,7 +960,10 @@ private fun PageContent(
     //
     // Falling back to the normal list when `dock_cards` is empty is what keeps
     // every other page working untouched.
-    val shownAll = if (page.dockCards.isNotEmpty()) page.dockCards else page.cards
+    val shownAll = (if (page.dockCards.isNotEmpty()) page.dockCards else page.cards)
+        // Hoisted into the header by AstrionDashboard; drawing it here as well
+        // would render it twice.
+        .filter { it.options["dock_header"] != true }
     // `dock_index_only` cards (the now-playing row) belong to the dock INDEX.
     // A submenu needs that height for its own sixth button; with the row left in
     // place a six-item menu overflows the screen.
@@ -892,17 +983,6 @@ private fun PageContent(
     // the gap as well as the content.
     val visible = scrolling.filter {
         it.type != "conditional" || ConditionalCard.matches(it, ctx)
-    }
-    // Same pipeline again for the level a back-swipe is heading TO. It can
-    // differ from the live list by more than the menu drawn inside the card:
-    // popping to the index brings the `dock_index_only` now-playing row back,
-    // so reusing `visible` for the layer underneath would reveal a page missing
-    // a row that reappears the instant the gesture completes.
-    val underVisible = run {
-        val parentInSub = com.custom.astrion.cards.impl.DockMenuState.path.size > 1
-        (if (parentInSub) shownAll.filter { it.options["dock_index_only"] != true } else shownAll)
-            .filter { it.options["pin"] != "bottom" }
-            .filter { it.type != "conditional" || ConditionalCard.matches(it, ctx) }
     }
     fun separatorIndex(name: String) = visible.indexOfFirst {
         it.type == "separator" &&
@@ -982,152 +1062,29 @@ private fun PageContent(
                 }
             }
         } else {
-            // Follows the finger during a dock back-swipe, and springs back if the
-            // gesture is abandoned. Without it the page simply jumped, which reads
-            // as a glitch rather than as a gesture that was understood.
-            // A PLAIN float during the drag, not an Animatable.
+            // No back-swipe here any more, and no preview layer.
             //
-            // Every move event was doing `scope.launch { snapTo() }` -- a
-            // coroutine dispatch per touch sample -- which is why this stuttered
-            // while the pager (which writes its offset directly) stayed smooth.
-            // Writing snapshot state costs nothing; the coroutine is only needed
-            // for the release animation.
-            var swipePx by remember { mutableFloatStateOf(0f) }
-            var boxW by remember { mutableFloatStateOf(0f) }
-            val swipeScope = rememberCoroutineScope()
-            val underState = rememberLazyListState()
-            // The detector and the thing that MOVES are deliberately two
-            // different nodes, and that is the whole fix for the shaking.
-            //
-            // With `offset` and `pointerInput` on one node, pointer positions
-            // are reported relative to the node's PLACED position -- so moving
-            // it by the drag changed the coordinate space the drag was being
-            // measured in. Every frame fed its own output back in as input:
-            // offset right 10px, next sample reads 10px less travel, offset
-            // shrinks, and it oscillates. That is the vibration, and no amount
-            // of smoothing the write path could fix it because the measurement
-            // itself was wrong.
-            //
-            // The Box stays put and does the measuring; only the list inside it
-            // moves.
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .onSizeChanged { boxW = it.width.toFloat() }
-                    // Dock back-swipe, detected ABOVE the list rather than inside
-                    // the card.
-                    //
-                    // Inside it the gesture was cancelled the moment a finger
-                    // actually moved: this LazyColumn claims the pointer (an
-                    // arcing thumb gives it a vertical component to grab) and the
-                    // child's detector dies with it -- the logs showed taps being
-                    // reported and every real drag vanishing. Here the handler is
-                    // the list's PARENT, so the Initial pass reaches it first and
-                    // consuming stops the list from scrolling the page away under
-                    // the gesture.
-                    .pointerInput(Unit) {
-                        val slop = viewConfiguration.touchSlop
-                        val commit = 40.dp.toPx()
-                        awaitEachGesture {
-                            val down = awaitFirstDown(
-                                requireUnconsumed = false,
-                                pass = PointerEventPass.Initial,
-                            )
-                            if (!com.custom.astrion.cards.impl.DockMenuState.inSubmenu) return@awaitEachGesture
-                            var dx = 0f
-                            var claimed = false
-                            while (true) {
-                                val ev = awaitPointerEvent(PointerEventPass.Initial)
-                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                                if (!ch.pressed) break
-                                dx = ch.position.x - down.position.x
-                                if (!claimed && dx > slop) claimed = true
-                                if (claimed) {
-                                    ch.consume()
-                                    swipePx = dx.coerceAtLeast(0f)
-                                }
-                            }
-                            android.util.Log.i(
-                                "AstrionKeys",
-                                "page swipe: dx=%.0f claimed=%b commit=%b".format(dx, claimed, dx > commit),
-                            )
-                            if (claimed && dx > commit) {
-                                // Carry the page the rest of the way OUT before
-                                // swapping levels, rather than popping under the
-                                // finger and letting the offset vanish -- that read
-                                // as the content blinking away mid-gesture. Pop at
-                                // the end, then snap back to zero so the level
-                                // underneath appears in place rather than sliding
-                                // in from the old offset.
-                                val w = size.width.toFloat()
-                                swipeScope.launch {
-                                    animate(swipePx, w, animationSpec = tween(160)) { v, _ ->
-                                        swipePx = v
-                                    }
-                                    com.custom.astrion.cards.impl.DockMenuState.popOne()
-                                    swipePx = 0f
-                                }
-                            } else if (claimed) {
-                                swipeScope.launch {
-                                    animate(swipePx, 0f) { v, _ -> swipePx = v }
-                                }
-                            }
-                        }
-                    },
-            ) {
-                // The level being swiped BACK to, drawn underneath and revealed
-                // as the current one slides away. Without it the page moved off
-                // over bare background and the destination only appeared once
-                // the gesture had finished, which reads as a cut rather than a
-                // drag: you are pulling one thing aside, so there has to be
-                // something behind it.
-                //
-                // It trails at a quarter of the finger's travel -- the shallow
-                // parallax that makes the two layers read as depth instead of
-                // as two pages sliding in lockstep. At full travel it is exactly
-                // at rest, so the swap at the end of the animation moves nothing.
-                if (swipePx > 0f && com.custom.astrion.cards.impl.DockMenuState.inSubmenu) {
-                    CompositionLocalProvider(
-                        com.custom.astrion.cards.impl.LocalDockPath provides
-                            com.custom.astrion.cards.impl.DockMenuState.path.dropLast(1)
-                    ) {
-                        LazyColumn(
-                            state = underState,
-                            // Inert: it is a preview of a level you have not
-                            // arrived at, and a scroll landing here would leave
-                            // the real list somewhere else once you did.
-                            userScrollEnabled = false,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .offset {
-                                    IntOffset(((swipePx - boxW) * 0.25f).roundToInt(), 0)
-                                },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            items(underVisible.size, key = { it }) { i ->
-                                RenderCard(underVisible[i], ctx)
-                            }
-                        }
-                    }
+            // Both existed to fake a transition between two levels rendered in
+            // the same place. A submenu is an overlay now (DockSubmenuOverlay),
+            // so the thing underneath is the real index, live -- there is
+            // nothing to preview and nothing to slide out of the way.
+            if (page.dockCards.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    visible.forEach { RenderCard(it, ctx) }
                 }
+            } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .offset { IntOffset(swipePx.roundToInt(), 0) }
-                        // Opaque, now that something is drawn behind it. A
-                        // transparent sliding layer would show the destination
-                        // THROUGH itself and the two levels would read as one
-                        // double-exposed page.
-                        .background(Color(0xFF0E2229)),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    // Index keys: the card list only changes when the layout
-                    // syncs, and they keep LazyColumn reusing slots instead of
-                    // re-composing on the list's identity.
                     items(visible.size, key = { it }) { i ->
                         RenderCard(visible[i], ctx)
                     }
@@ -1212,72 +1169,156 @@ private fun RenderCard(cardConfig: CardConfig, ctx: CardContext) {
 }
 
 @Composable
-private fun PageIndicator(
+private fun RoomIndicator(
     pages: List<PageConfig>,
     current: Int,
     onDotClick: (Int) -> Unit,
     onOpenPanel: () -> Unit = {},
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            // The device panel used to open from HERE, on a swipe up. It now
-            // opens only from a swipe DOWN on the status bar. One gesture, one
-            // edge: the bottom bar is also the row that disappears inside a dock
-            // submenu, which made the panel unreachable exactly where you might
-            // want it, and it shares pixels with Android's swipe-up-to-home on
-            // any device that has one.
-            // Keep clear of the system's gesture strip. Two reasons, and the
-            // second is the important one:
-            //  - the gesture handle DRAWS over this bar on a device that has one
-            //    (the Pixel Tablet keeps it even in immersive mode, where hiding
-            //    the bars sets the navigationBars inset to 0 but not this one),
-            //    which put a white pill through the page name; and
-            //  - our own swipe-up-to-open-panel would otherwise share pixels
-            //    with Android's swipe-up-to-home, and the system wins.
-            // The HA100 has neither, so this measures 0 there and nothing moves.
-            .windowInsetsPadding(WindowInsets.systemGestures.only(WindowInsetsSides.Bottom))
-            // 48dp here used to buy somewhere to START the swipe-up drag.
-            // That gesture has moved to the status bar, which now carries the
-            // thumb-sized band instead, so this shrinks by roughly what the top
-            // grew by and the cards keep the same room. What is left only has
-            // to be tappable, and the page label brings its own padding.
-            .heightIn(min = 34.dp)
-            .padding(top = 4.dp, bottom = 5.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            pages.forEachIndexed { i, _ ->
-                val active = i == current
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = 5.dp)
-                        .size(if (active) 10.dp else 8.dp)
-                        .clip(CircleShape)
-                        .background(if (active) Color(0xFF6EA8FE) else Color(0xFF33525E))
-                        .clickable { onDotClick(i) },
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            // Tapping the page name opens the device panel. This is NOT
-            // redundant with the swipe-down on the status bar: the panel is the
-            // only route out of the kiosk, and an exit hatch that depends on
-            // landing a drag in a thin edge band is not an exit hatch. The dots
-            // keep their own job (switching pages); only the label does this.
-            Text(
-                pages.getOrNull(current)?.name ?: "",
-                color = Color(0xFF93AFB6),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        pages.forEachIndexed { i, _ ->
+            val active = i == current
+            // The same muted colour as the clock and the room name, not the
+            // accent blue. In the status bar the dots sit beside two readouts
+            // they are subordinate to; an accent there reads as a notification.
+            // Presence is carried by opacity instead.
+            Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onOpenPanel() }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 4.dp)
+                    .size(if (active) 8.dp else 6.dp)
+                    .clip(CircleShape)
+                    .background(if (active) Color(0xFF93AFB6) else Color(0x5993AFB6))
+                    .clickable { onDotClick(i) },
             )
+        }
+        Spacer(Modifier.width(6.dp))
+        // Tapping the room name opens the device panel. This is NOT redundant
+        // with the swipe-down on this same bar: the panel is the only route out
+        // of kiosk mode, and an exit hatch that depends on landing a drag in a
+        // thin edge band is not an exit hatch. The dots keep their own job
+        // (switching rooms); only the label does this.
+        //
+        // The tap target is deliberately small in padding terms -- it sits
+        // inside the status bar now, and a generous one would eat into the swipe
+        // band that opens the same panel.
+        Text(
+            pages.getOrNull(current)?.name ?: "",
+            color = Color(0xFF93AFB6),
+            // Same size as the clock and battery either side of it. At 12sp it
+            // read as a caption belonging to something rather than as the third
+            // readout on the row.
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { onOpenPanel() }
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/**
+ * A dock submenu, drawn over the index rather than in place of it.
+ *
+ * The index and its now-playing header stay mounted underneath and never move.
+ * That is the whole reason this exists: while a submenu lived inside the page,
+ * the header had to be unmounted to give the grid its rows back, so backing out
+ * snapped it into view. Nothing can snap into view if it never left.
+ *
+ * It starts below the status bar, so the clock and battery stay legible; the
+ * status bar is drawn after this at the root for the same reason.
+ */
+@Composable
+private fun DockSubmenuOverlay(page: PageConfig, ctx: CardContext) {
+    var swipePx by remember { mutableFloatStateOf(0f) }
+    val scope = rememberCoroutineScope()
+
+    // The header card is hoisted into the band and must not be drawn again here.
+    val cards = remember(page) { page.dockCards.filter { it.options["dock_header"] != true } }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Swipe right to go back. Measured on this Box, which does not move;
+            // only the content inside it does. Putting the offset and the
+            // detector on one node makes the gesture measure itself in a
+            // coordinate space it is changing, and the page visibly shakes.
+            .pointerInput(Unit) {
+                val slop = viewConfiguration.touchSlop
+                val commit = 40.dp.toPx()
+                awaitEachGesture {
+                    val down = awaitFirstDown(
+                        requireUnconsumed = false,
+                        pass = PointerEventPass.Initial,
+                    )
+                    var dx = 0f
+                    var claimed = false
+                    while (true) {
+                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                        val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!ch.pressed) break
+                        dx = ch.position.x - down.position.x
+                        if (!claimed && dx > slop) claimed = true
+                        if (claimed) {
+                            ch.consume()
+                            swipePx = dx.coerceAtLeast(0f)
+                        }
+                    }
+                    if (claimed && dx > commit) {
+                        val w = size.width.toFloat()
+                        scope.launch {
+                            animate(swipePx, w, animationSpec = tween(160)) { v, _ -> swipePx = v }
+                            com.custom.astrion.cards.impl.DockMenuState.popOne()
+                            swipePx = 0f
+                        }
+                    } else if (claimed) {
+                        scope.launch { animate(swipePx, 0f) { v, _ -> swipePx = v } }
+                    }
+                }
+            },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .offset { IntOffset(swipePx.roundToInt(), 0) }
+                // Opaque, and covering the FULL height including the strip
+                // behind the status bar. Starting below the status bar instead
+                // left the top of the header's blurred artwork showing above
+                // the menu -- the index leaking through a gap the overlay was
+                // supposed to close.
+                //
+                // The background belongs on this moving layer, not on the Box
+                // around it: a backdrop that stays put would be what a swipe
+                // reveals, instead of the index.
+                .background(Color(0xFF0E2229))
+                .padding(
+                    start = 10.dp,
+                    end = 10.dp,
+                    // Clears the status bar, which is drawn above this.
+                    top = STATUS_BAR_BAND + 8.dp,
+                    bottom = 8.dp,
+                ),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            cards.forEach { RenderCard(it, ctx) }
         }
     }
 }
+
+/** The status bar's own height, which the submenu overlay starts below. */
+private val STATUS_BAR_BAND = 46.dp
+
+/**
+ * Height reserved at the top of a dock index for the now-playing header.
+ *
+ * Constant on purpose: the grid starts below it, so anything that changes this
+ * moves every button on the page. Sized to the header's natural height with its
+ * text capped at two lines -- see MediaPlayerCard's header variant, which is
+ * what makes "natural height" a single number rather than one per source.
+ */
+private val HEADER_BAND = 132.dp
 
 /** How long a connection may be down before it is worth telling anyone. */
 private const val BANNER_GRACE_MS = 4000L

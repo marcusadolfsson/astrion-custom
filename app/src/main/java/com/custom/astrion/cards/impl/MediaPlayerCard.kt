@@ -3,6 +3,7 @@ package com.custom.astrion.cards.impl
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import com.custom.astrion.ui.ackColor
 import com.custom.astrion.ui.pressFeedback
@@ -32,6 +33,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -68,6 +70,43 @@ import com.custom.astrion.ha.ServiceCall
  *   { "type": "media_player", "options": { "entity_id": "media_player.club",
  *       "variant": "full" } }   // omit variant for compact
  */
+/**
+ * Process-wide album art cache, keyed on `entity_picture`.
+ *
+ * The art used to live only in the card's `remember`, which is discarded the
+ * moment the card leaves composition -- so every return to the dock index
+ * re-fetched the poster over the network and re-ran the downscale, and you
+ * watched it arrive. Nothing was wrong with the fetch; the result simply had
+ * nowhere to survive.
+ *
+ * Both halves are cached. The downscaled copy matters as much as the original:
+ * it is a filtered scale of a full-size poster, and redoing it on every swipe
+ * is work this device has no headroom for.
+ *
+ * Bounded and access-ordered (a real LRU) rather than a plain map. A poster at
+ * full size is a couple of MB, the key changes whenever the artwork does, and an
+ * unbounded map would grow for as long as the app runs -- which on a remote that
+ * is never restarted means forever. Four is enough for what you actually swipe
+ * between; the blurred copies are 32px wide and cost nothing.
+ */
+private object ArtCache {
+    private const val MAX_FULL = 4
+    private const val MAX_BLUR = 8
+
+    private fun lru(max: Int) = object : LinkedHashMap<String, ImageBitmap>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>?) =
+            size > max
+    }
+
+    private val full = lru(MAX_FULL)
+    private val blur = lru(MAX_BLUR)
+
+    @Synchronized fun getFull(key: String): ImageBitmap? = full[key]
+    @Synchronized fun putFull(key: String, v: ImageBitmap) { full[key] = v }
+    @Synchronized fun getBlur(key: String): ImageBitmap? = blur[key]
+    @Synchronized fun putBlur(key: String, v: ImageBitmap) { blur[key] = v }
+}
+
 class MediaPlayerCard : CardRenderer {
     override val type = "media_player"
 
@@ -81,6 +120,11 @@ class MediaPlayerCard : CardRenderer {
         // does it. This is a STATUS row you glance at, not a control surface,
         // which is also why it does not hide itself when nothing is playing.
         val strip = config.string("variant") == "strip"
+        // "header" is the strip re-cut to BE the page header rather than to sit
+        // under one. Same resolution logic above -- the staleness check in
+        // particular is subtle enough that a second copy of it would drift --
+        // only the arrangement below differs.
+        val header = config.string("variant") == "header"
         val topButtons = (config.options["top_buttons"] as? List<Map<String, Any?>>) ?: emptyList()
         // Optional reverse/forward transport buttons, each an action map
         // {service, entity_id, data}. Shown only when set.
@@ -163,13 +207,25 @@ class MediaPlayerCard : CardRenderer {
                 ?: e?.attrString("app_name")
         )
 
-        var art by remember(artPath) { mutableStateOf<ImageBitmap?>(null) }
-        LaunchedEffect(artPath) { art = artPath?.let { ctx.client.fetchBitmap(it) } }
+        // Seeded from the cache, so a cached poster is on screen in the FIRST
+        // frame rather than after a round trip that happens to be quick.
+        var art by remember(artPath) {
+            mutableStateOf(artPath?.let { ArtCache.getFull(it) })
+        }
+        LaunchedEffect(artPath) {
+            val path = artPath ?: return@LaunchedEffect
+            if (art != null) return@LaunchedEffect
+            art = ctx.client.fetchBitmap(path)?.also { ArtCache.putFull(path, it) }
+        }
 
         // Downscale off the main thread: this ran inside remember{}, i.e. during
         // composition on the UI thread — a filtered scale of full-size album art.
-        var blurredBg by remember(art) { mutableStateOf<ImageBitmap?>(null) }
+        var blurredBg by remember(art) {
+            mutableStateOf(artPath?.let { ArtCache.getBlur(it) })
+        }
         LaunchedEffect(art) {
+            if (blurredBg != null) return@LaunchedEffect
+            val path = artPath
             blurredBg = art?.let { img ->
                 withContext(Dispatchers.Default) {
                     val src = img.asAndroidBitmap()
@@ -178,7 +234,7 @@ class MediaPlayerCard : CardRenderer {
                     val h = (w * src.height / src.width).coerceAtLeast(1)
                     Bitmap.createScaledBitmap(src, w, h, true).asImageBitmap()
                 }
-            }
+            }?.also { if (path != null) ArtCache.putBlur(path, it) }
         }
 
         val mp: (String, Array<out Pair<String, Any?>>) -> Unit =
@@ -195,7 +251,10 @@ class MediaPlayerCard : CardRenderer {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
+                // The header is full-bleed: it runs to the screen edges and
+                // carries the clock and battery on top of it, so a rounded card
+                // with a margin would just reintroduce the frame it replaces.
+                .then(if (header) Modifier else Modifier.clip(RoundedCornerShape(20.dp)))
                 .background(Color(0xFF1B343D)),
         ) {
             // Blurred album art background + scrim for legibility.
@@ -215,9 +274,12 @@ class MediaPlayerCard : CardRenderer {
             when {
                 full -> FullContent(ctx, title, artist, playing, art, mp, topButtons, reverseBtn, forwardBtn)
                 strip -> StripContent(config, ctx, realTitle, title, artist, art)
+                header -> HeaderContent(config, ctx, entityId, realTitle, title, artist, art)
                 else -> CompactContent(title, artist, art, mp)
             }
         }
+        // NOT the header's: that one is drawn inside the card, so the blurred
+        // artwork runs behind it instead of stopping at a hard edge above it.
         if (strip) ProgressBar(ctx, entityId)
         }
     }
@@ -241,6 +303,152 @@ class MediaPlayerCard : CardRenderer {
      * 480x800 remote the full panel pushed the Watch section off the screen for
      * something you only glance at.
      */
+    /**
+     * The now-playing row AS the page header, with the clock and battery drawn
+     * over it rather than on a bar of their own.
+     *
+     * The point is vertical space. The old arrangement stacked three things --
+     * status bar, then a now-playing card, then the buttons -- on a 800px screen
+     * where the buttons are the reason the view exists. Folding the first into
+     * the second gives that height back to the grid.
+     *
+     * The clock and battery genuinely overlap this row -- they are not given a
+     * reserved strip -- which is only safe because of the scrim below. The row
+     * can be backed by album art of any brightness, and the first cut put the
+     * clock straight over a film poster: readable against that one, a coin flip
+     * against the next. A gradient across the top few dp costs nothing and makes
+     * the overlap unconditional, which is what lets `top_inset` be small instead
+     * of being a reserved bar wearing a different name.
+     */
+    @Composable
+    @Suppress("UNCHECKED_CAST")
+    private fun HeaderContent(
+        config: CardConfig,
+        ctx: CardContext,
+        entityId: String?,
+        realTitle: String?,
+        title: String,
+        artist: String?,
+        art: ImageBitmap?,
+    ) {
+        val artSize = config.int("art_size", 48).dp
+        // Row and timeline in ONE column, so the blurred backdrop behind them
+        // covers both. They used to be siblings either side of the card's edge,
+        // which put a hard horizontal seam across the header exactly where the
+        // artwork was still going.
+        Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start = 14.dp,
+                    end = 14.dp,
+                    // 14dp was too greedy and the screenshot showed it: the
+                    // clock landed on the poster and the battery sat on the
+                    // launcher button. The clock is ~38dp tall, so anything less
+                    // than that puts content in both corners. The height this
+                    // costs back is taken off the progress row instead, which
+                    // was spending 33dp on two timestamps.
+                    //
+                    // The extra 6dp on top comes straight off the bottom, so the
+                    // row keeps its height and the band, the grid and everything
+                    // below stay exactly where they are -- the CONTENT moves
+                    // down toward the timeline, the background does not move at
+                    // all. Artwork and title now group with the bar they belong
+                    // to instead of floating midway between it and the clock.
+                    top = config.int("top_inset", 46).dp,
+                    bottom = config.int("bottom_inset", 4).dp,
+                ),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val artMod = Modifier.size(artSize).clip(RoundedCornerShape(8.dp))
+            if (art != null) {
+                Image(art, null, modifier = artMod, contentScale = ContentScale.Crop)
+            } else {
+                Box(artMod.background(Color(0xFF24404A)))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (realTitle != null) title else "Nothing playing",
+                    color = if (realTitle != null) Color(0xFFF1F4FA) else Color(0xFF93AFB6),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    // ONE line, always, and it SCROLLS when it does not fit.
+                    //
+                    // The header has to be the same height in every room,
+                    // because the buttons below are positioned from its bottom
+                    // edge -- and it was not. The Kaleidescape publishes a title
+                    // and nothing else; an Apple TV publishes a long title AND
+                    // an app name that becomes the subtitle. Three lines of text
+                    // beat the artwork for height and pushed that room's grid
+                    // 33px down.
+                    //
+                    // Capping at one line fixes the height for free: with a
+                    // subtitle the text is two lines, without one it is one, and
+                    // either way the 48dp artwork is at least as tall -- so the
+                    // artwork sets the height in every case. Marquee then gives
+                    // the long title back rather than ellipsing it, which is the
+                    // better trade in a row you look at repeatedly.
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.basicMarquee(
+                        // Enough passes to read a film title, then it settles.
+                        // Endless motion beside a grid of buttons is a
+                        // distraction, not information.
+                        iterations = 3,
+                        initialDelayMillis = 1200,
+                        repeatDelayMillis = 2000,
+                    ),
+                )
+                if (!artist.isNullOrBlank()) {
+                    Text(artist, color = Color(0xFFB6BECC), fontSize = 12.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            LauncherButton(
+                config.options["launcher"] as? Map<String, Any?>,
+                ctx,
+                size = config.int("button_size", 48).dp,
+            )
+        }
+        // The artwork fades to the page colour across the timeline rather than
+        // being cut off above it. Two jobs at once: the header stops having a
+        // visible bottom edge, and the two timestamps get a background that is
+        // solid where they sit instead of whatever the poster happened to be.
+        //
+        // A gradient, not a flat scrim -- flat would reinstate the same seam a
+        // few dp lower.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(0x000E2229), Color(0xE60E2229), Color(0xFF0E2229)),
+                    )
+                )
+        ) {
+            ProgressBar(ctx, entityId, inlineLabels = true)
+        }
+        }
+        // AFTER the row, deliberately: the thing the clock most often lands on
+        // is the album art thumbnail at the left, so a scrim drawn UNDER the row
+        // dims the blurred backdrop and leaves the bright poster corner exactly
+        // where the problem is. Drawn last, it covers everything the clock and
+        // battery can overlap. It is only the top 40dp, so the artwork below is
+        // untouched.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(config.int("scrim_height", 40).dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(0xB3000000), Color(0x00000000)),
+                    )
+                )
+        )
+    }
+
     @Composable
     @Suppress("UNCHECKED_CAST")
     private fun StripContent(
@@ -304,7 +512,20 @@ class MediaPlayerCard : CardRenderer {
      * media_position_updated_at makes it move like a progress bar should.
      */
     @Composable
-    private fun ProgressBar(ctx: CardContext, entityId: String?) {
+    private fun ProgressBar(
+        ctx: CardContext,
+        entityId: String?,
+        /**
+         * Put the timestamps BESIDE the bar instead of under it.
+         *
+         * Same information, one row instead of two. Under the bar they cost the
+         * header 33dp on the screen whose entire problem is height; beside it
+         * they cost nothing vertical and only shorten a bar whose precision was
+         * never the point. The strip keeps them underneath, where the card has
+         * the room and the full-width bar lines up with the card edges.
+         */
+        inlineLabels: Boolean = false,
+    ) {
         val e = entityId?.let { ctx.entities[it] } ?: return
         val duration = e.attrDouble("media_duration")?.takeIf { it > 0 } ?: return
         val reported = e.attrDouble("media_position") ?: return
@@ -328,9 +549,9 @@ class MediaPlayerCard : CardRenderer {
         // card spacing, which made the gap under the bar 6dp wider than every
         // other card-to-section gap -- so the divider after it sat visibly
         // lower than the ones further down the page.
-        Column(modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 6.dp)) {
+        val bar = @Composable { mod: Modifier ->
             Box(
-                Modifier.fillMaxWidth().height(4.dp)
+                mod.height(4.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(Color(0x33FFFFFF)),
             ) {
@@ -340,10 +561,27 @@ class MediaPlayerCard : CardRenderer {
                         .background(Color(0xFF4C8DFF)),
                 )
             }
-            Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        }
+        if (inlineLabels) {
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Text(clock(pos), color = Color(0xFF93AFB6), fontSize = 11.sp)
-                Spacer(Modifier.weight(1f))
+                // The bar gives up exactly the width the two timestamps need.
+                bar(Modifier.weight(1f))
                 Text("-" + clock(duration - pos), color = Color(0xFF93AFB6), fontSize = 11.sp)
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 6.dp)) {
+                bar(Modifier.fillMaxWidth())
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Text(clock(pos), color = Color(0xFF93AFB6), fontSize = 11.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text("-" + clock(duration - pos), color = Color(0xFF93AFB6), fontSize = 11.sp)
+                }
             }
         }
     }

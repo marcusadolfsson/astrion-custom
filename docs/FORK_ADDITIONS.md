@@ -212,6 +212,7 @@ off rendered as a bare unlabelled icon.
 | `status_big` | Large value BESIDE the icon rather than under it. Suppresses the caption -- a tile already showing two numbers does not need naming. |
 | `status_pills` | Outlined pills under the icon row; `color: heat` for the warm one. |
 | `index_status` | Same keys again, read only by the index tile, for a menu whose `status_entity` means something else. Shades needs it: that field is the shade *target*, which drives the submenu's nested tile and its selection highlight, while the index wants to know whether the shades are open. |
+| `on_leave` | A service call fired when the menu stops being shown — Back, a swipe, a room change, the screensaver. For state that should not outlive the page that set it. Skipped on any preview rendering, so a cancelled gesture cannot have changed something. |
 | `show_status: false` | Keep the NAME on the index and still use `status_entity` for the submenu. |
 | `close_on_select` | Pop a level after a choice. Right for pick-one menus; wrong for shades, where Stop follows Open. |
 | `corner: true` | Lift an item into the back row beside the lock -- things that *qualify* the menu rather than being one of its choices. |
@@ -219,8 +220,33 @@ off rendered as a bare unlabelled icon.
 | `lock` | `{entity, pin_entry, pin_entity}` -- red pill and a PIN pad. Home Assistant does the comparing, so the remote never stores the secret. |
 | `card` | Render a normal card instead of a grid. The thermostat embeds `bubble_climate` with `inline: true`, because fixed rungs cannot express a setpoint between them, or two bounds at all. |
 
-**Swipe right to go back**, with the destination level revealed behind the one sliding
-away. Four traps, each of which cost an evening:
+**A submenu is drawn OVER the index, not in place of it.** The page underneath is
+forced to the index and stays mounted, so swiping a menu away uncovers something that
+was already there. This is not a detail — it is what makes the view stable:
+
+- Anything the index owns (the now-playing header) cannot snap into view on the way
+  out, because it never left. Rendering the two levels in the same place meant the
+  header had to be unmounted to give a submenu its rows back.
+- Nothing under the overlay re-measures, so the grid cannot shift, and the tiles cannot
+  change size between the two levels.
+
+It also retired two earlier workarounds, both of which had bugs of their own: a preview
+layer drawn under the sliding page (it measured children with an infinite height, so its
+tiles used the fallback size and visibly *grew* on commit), and a page-level back-swipe
+that had to fight the scrolling list it lived inside.
+
+Three things the overlay has to get right, all of which were found on a device rather
+than in review:
+
+- **It covers the full height**, including the strip behind the status bar. Starting
+  below the bar left the index's artwork showing above the menu — leaking through the
+  gap the overlay exists to close.
+- **The opaque background goes on the moving layer.** On the container around it, a
+  swipe reveals the overlay's own backdrop instead of the index.
+- **The status bar is drawn at the root, above the overlay**, so the clock stays
+  readable while a submenu covers everything else.
+
+**Swipe right to go back.** Four traps, each of which cost an evening:
 
 - **The gesture cannot be detected inside the card.** The card sits in a `LazyColumn`,
   which claims the pointer the instant a real thumb moves -- a thumb arcs, so the list

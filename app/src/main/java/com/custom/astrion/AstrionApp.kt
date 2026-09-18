@@ -22,6 +22,7 @@ import com.custom.astrion.cards.impl.SceneGridCard
 import com.custom.astrion.cards.impl.SeparatorCard
 import com.custom.astrion.cards.impl.ShadeControlCard
 import com.custom.astrion.cards.impl.DockMenuCard
+import com.custom.astrion.cards.impl.WeatherHeaderCard
 import com.custom.astrion.cards.impl.SourceModalCard
 import com.custom.astrion.cards.impl.SourceSelectCard
 import com.custom.astrion.cards.impl.SpeakerGroupCard
@@ -70,6 +71,7 @@ class AstrionApp : Application() {
             SeparatorCard(),
             ShadeControlCard(),
             DockMenuCard(),
+            WeatherHeaderCard(),
             // ← register your own card types here
         )
     }

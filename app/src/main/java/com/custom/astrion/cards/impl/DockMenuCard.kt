@@ -1004,14 +1004,23 @@ class DockMenuCard : CardRenderer {
                     if (showCaption) {
                         Text(
                             caption!!.uppercase(),
-                            // Deliberately quiet: it is the one thing on the tile
-                            // that never changes, so it should be the last thing
-                            // the eye stops on. Letter-spacing is what keeps it
-                            // legible at this size rather than just small.
-                            color = if (selected) Color(0xCCFFFFFF) else Color(0xFF7FA4B0),
-                            fontSize = (height * 0.075f).coerceIn(9f, 12f).sp,
-                            fontWeight = FontWeight.Medium,
-                            letterSpacing = 0.9.sp,
+                            // Quieter than the live value above it, but not
+                            // small. The first cut sized it at 0.075 of the tile
+                            // and capped it at 12sp, which came out near 10sp
+                            // against a 20sp status line -- "subordinate" turned
+                            // into "hard to read from the sofa", which is the
+                            // one place this is read from. It names the tile;
+                            // on the three tiles whose thing is off it is the
+                            // ONLY thing naming them.
+                            //
+                            // Still distinguished from the value by weight,
+                            // colour and letter-spacing rather than by being
+                            // tiny -- the hierarchy survives without relying on
+                            // the eye winning an argument with the pixel grid.
+                            color = if (selected) Color(0xE6FFFFFF) else Color(0xFF9FBCC6),
+                            fontSize = (height * 0.105f).coerceIn(11f, 16f).sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.1.sp,
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                             modifier = Modifier.padding(horizontal = 4.dp),

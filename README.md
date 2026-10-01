@@ -23,6 +23,52 @@ it cannot be swiped out of. See
 
 ## Screenshots
 
+### Big touch points
+
+| Index | Activity | Lights |
+|---|---|---|
+| ![Dock index](examples/screenshots/23-dock-index.png) | ![Dock activity](examples/screenshots/24-dock-activity.png) | ![Dock lights](examples/screenshots/25-dock-lights.png) |
+
+| Climate | Shades | Nothing playing |
+|---|---|---|
+| ![Dock climate](examples/screenshots/26-dock-climate.png) | ![Dock shades](examples/screenshots/27-dock-shades.png) | ![Dock weather header](examples/screenshots/28-dock-weather.png) |
+
+A 3" screen at arm's length does not give a scrolling card list much of a
+chance. Adding a `dock_cards:` key to a page renders it as a 2-wide grid of
+large buttons instead — roughly five times the target area, each one showing
+what its thing is currently doing, so most glances need no tap at all. Tapping
+one opens a submenu of equally large buttons; swipe right to come back.
+
+It is set per page: a page with `dock_cards:` renders this way, and a page
+without it keeps the [card list](#the-card-list), so you can convert one room
+at a time. **But where it is present it wins outright** — that page's own
+`cards:` list becomes unreachable rather than acting as a fallback, so anything
+you still want must appear in the new list too.
+
+**Nothing on the page moves.** That turned out to be the hard part, and most of
+the design follows from it:
+
+- The top band is **reserved whether or not anything is playing**, so the
+  buttons sit in the same place in a silent room as in a loud one. What is
+  playing goes in that band, with the clock and battery drawn over it; when
+  nothing is, a `weather_header` fills it.
+- A submenu is drawn **over** the index, not in place of it. The index stays
+  mounted and unmoved underneath, so backing out uncovers it rather than
+  rebuilding it — and the now-playing header cannot snap into view, because it
+  never left.
+- A now-playing title is one line with a marquee rather than wrapping, which is
+  what makes that band the same height across sources: one publishes a bare
+  title, another a long title *and* an app name it uses as a subtitle.
+
+Layout: [`examples/dashboard-dock.yaml`](examples/dashboard-dock.yaml).
+Supporting template sensors: [`homeassistant/templates-dock.yaml`](homeassistant/templates-dock.yaml).
+
+### The card list
+
+The original presentation, and what a page without `dock_cards:` still shows: a
+scrolling list of cards, which suits a remote in the hand better than one across
+the room.
+
 | Main page | Activity selector | Now playing |
 |---|---|---|
 | ![Main](examples/screenshots/01-main.png) | ![Activity](examples/screenshots/02-activity-selector.png) | ![Kaleidescape](examples/screenshots/03-kaleidescape.png) |
@@ -85,43 +131,6 @@ document is unchanged — only `ui:` differs.
 The layout behind these shots is [`examples/dashboard.yaml`](examples/dashboard.yaml)
 — a real, in-use configuration rather than a toy one.
 
-### Optional: bigger touch points
-
-![Dock index](examples/screenshots/23-dock-index.png)
-![Dock climate](examples/screenshots/26-dock-climate.png)
-
-A 3" screen at arm's length does not give a scrolling card list much of a
-chance. Adding a `dock_cards:` key to a page renders it as a 2-wide grid of
-large buttons instead — roughly five times the target area, each one showing
-what its thing is currently doing, so most glances need no tap at all. Tapping
-one opens a submenu of equally large buttons; swipe right to come back.
-
-It is per page and entirely opt-in: a page without `dock_cards:` is unchanged,
-so you can convert one room and live with it before deciding. **But where it is
-present it wins outright** — that page's own `cards:` list becomes unreachable
-rather than acting as a fallback, so anything you still want must appear in the
-new list too.
-
-**Nothing on the page moves.** That turned out to be the hard part, and most of
-the design follows from it:
-
-- The top band is **reserved whether or not anything is playing**, so the
-  buttons sit in the same place in a silent room as in a loud one. What is
-  playing goes in that band, with the clock and battery drawn over it; when
-  nothing is, a `weather_header` fills it.
-- A submenu is drawn **over** the index, not in place of it. The index stays
-  mounted and unmoved underneath, so backing out uncovers it rather than
-  rebuilding it — and the now-playing header cannot snap into view, because it
-  never left.
-- A now-playing title is one line with a marquee rather than wrapping, which is
-  what makes that band the same height across sources: one publishes a bare
-  title, another a long title *and* an app name it uses as a subtitle.
-
-![Dock weather header](examples/screenshots/28-dock-weather.png)
-
-Layout: [`examples/dashboard-dock.yaml`](examples/dashboard-dock.yaml).
-Supporting template sensors: [`homeassistant/templates-dock.yaml`](homeassistant/templates-dock.yaml).
-
 ---
 
 ## What this fork changes
@@ -132,7 +141,7 @@ layout) is unchanged. Each item below landed as its own commit.
 | Area | Change |
 |---|---|
 | **New cards** | `separator`, `bubble_select`, `shade_control`, `bubble_climate`, `conditional`, `dpad`, `dock_menu`, `weather_header` |
-| **Big-touch layout** | *optional* — add `dock_cards:` to a page and it renders as a 2-wide grid of large buttons with live state on every tile, nested menus, and swipe-right-to-go-back. Pages without it are unchanged. See [`examples/dashboard-dock.yaml`](examples/dashboard-dock.yaml) |
+| **Big-touch layout** | add `dock_cards:` to a page and it renders as a 2-wide grid of large buttons with live state on every tile, nested menus, and swipe-right-to-go-back. Pages without it are unchanged. See [`examples/dashboard-dock.yaml`](examples/dashboard-dock.yaml) |
 | **Changed cards** | `bubble_climate` rebuilt (hold indicator, mode + dual setpoints, scrolling picker), brightness sliders and a radio latch button inside `bubble_select`, `media_player` transport rework + auto-collapse + stale-metadata guard, `monitor` attribute rows, `button_grid` selected state, `fan` tile restyle |
 | **Hotkeys** | corrected HA100 keycode map, `scroll_to` a section, `open_on` auto-opens a selector, `action: sync` |
 | **Configuration** | credentials out of the APK, a setup web server, layout sync from Home Assistant, a device panel, per-remote start page, tilt-based motion wake and dock display |
